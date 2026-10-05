@@ -1,0 +1,49 @@
+{
+  "name": "driver-alert-app",
+  "version": "1.0.0",
+  "description": "운전기사 자동 알림 서비스 - Android 앱",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "android": "npm run build && npx cap sync && npx cap open android",
+    "sync": "npx cap sync",
+    "update": "npx cap update"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  },
+  "capacitor": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/geolocation": "^6.0.0",
+    "@capacitor/haptics": "^6.0.0",
+    "@capacitor/local-notifications": "^6.0.0",
+    "@capacitor/share": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0",
+    "@capacitor-community/keep-awake": "^6.0.0"
+  },
+  "capacitor-install-commands": {
+    "step1": "npm install @capacitor/core @capacitor/cli",
+    "step2": "npm install @capacitor/android",
+    "step3": "npm install @capacitor/app @capacitor/geolocation @capacitor/haptics",
+    "step4": "npm install @capacitor/local-notifications @capacitor/share @capacitor/splash-screen",
+    "step5": "npm install @capacitor-community/keep-awake"
+  },
+  "notes": {
+    "install": "위 capacitor 섹션의 패키지들을 설치하세요",
+    "android_add": "npx cap add android 명령어로 Android 플랫폼 추가",
+    "sync": "코드 변경 후 npx cap sync로 동기화",
+    "build": "npm run build로 웹 빌드 후 Android Studio에서 실행"
+  }
+}

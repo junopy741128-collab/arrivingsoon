@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 156 46% 11%;
+    /* #0f2920 converted to HSL-ish or just mapped */
+    --foreground: 0 0% 100%;
+
+    --card: 161 40% 17%;
+    /* #1a3d32 */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 161 40% 17%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 152 100% 50%;
+    /* #00ff88 */
+    --primary-foreground: 156 46% 11%;
+
+    --secondary: 161 40% 17%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 161 20% 40%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 152 100% 50%;
+    --accent-foreground: 156 46% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 19% 27%;
+    --input: 217 19% 27%;
+    --ring: 152 100% 50%;
+
+    --radius: 1rem;
+    /* 16px */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-app-primary text-text-primary;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input, textarea {
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+
+  ::selection {
+    background-color: #3300ff88;
+    color: inherit;
+  }
+}
+
+/* Safe Area Utilities */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pb-safe-nav {
+  /* Navigation Height (80px) + Bottom Padding (16px) + Safe Area */
+  padding-bottom: calc(80px + 16px + env(safe-area-inset-bottom));
+}
+
+/* Custom Scrollbar Hide */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

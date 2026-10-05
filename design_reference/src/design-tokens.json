@@ -1,0 +1,358 @@
+{
+  "$schema": "https://design-tokens.org/v1.0.0/schema.json",
+  "colors": {
+    "background": {
+      "primary": {
+        "value": "#0f2920",
+        "type": "color",
+        "description": "메인 배경색 (어두운 녹색)"
+      },
+      "secondary": {
+        "value": "#1a3d32",
+        "type": "color",
+        "description": "카드 및 섹션 배경색"
+      },
+      "tertiary": {
+        "value": "#234a3d",
+        "type": "color",
+        "description": "Hover 상태 배경색"
+      }
+    },
+    "accent": {
+      "primary": {
+        "value": "#00ff88",
+        "type": "color",
+        "description": "주요 강조색 (밝은 녹색)"
+      },
+      "hover": {
+        "value": "#00dd77",
+        "type": "color",
+        "description": "Hover 상태 강조색"
+      },
+      "light": {
+        "value": "rgba(0, 255, 136, 0.2)",
+        "type": "color",
+        "description": "투명 강조색 (20%)"
+      }
+    },
+    "text": {
+      "primary": {
+        "value": "#ffffff",
+        "type": "color",
+        "description": "기본 텍스트 색상"
+      },
+      "secondary": {
+        "value": "#d1d5db",
+        "type": "color",
+        "description": "보조 텍스트 (gray-300)"
+      },
+      "muted": {
+        "value": "#9ca3af",
+        "type": "color",
+        "description": "비활성/설명 텍스트 (gray-400)"
+      },
+      "disabled": {
+        "value": "#6b7280",
+        "type": "color",
+        "description": "비활성화 텍스트 (gray-500)"
+      }
+    },
+    "status": {
+      "success": {
+        "value": "#22c55e",
+        "type": "color",
+        "description": "성공/활성 상태 (green-500)"
+      },
+      "success-bg": {
+        "value": "rgba(34, 197, 94, 0.2)",
+        "type": "color"
+      },
+      "warning": {
+        "value": "#eab308",
+        "type": "color",
+        "description": "경고 상태 (yellow-500)"
+      },
+      "warning-bg": {
+        "value": "rgba(251, 191, 36, 0.2)",
+        "type": "color"
+      },
+      "error": {
+        "value": "#ef4444",
+        "type": "color",
+        "description": "에러 상태 (red-500)"
+      },
+      "error-bg": {
+        "value": "rgba(239, 68, 68, 0.2)",
+        "type": "color"
+      },
+      "info": {
+        "value": "#3b82f6",
+        "type": "color",
+        "description": "정보 상태 (blue-500)"
+      },
+      "info-bg": {
+        "value": "rgba(59, 130, 246, 0.2)",
+        "type": "color"
+      }
+    },
+    "border": {
+      "default": {
+        "value": "#374151",
+        "type": "color",
+        "description": "기본 경계선 (gray-700)"
+      },
+      "light": {
+        "value": "#4b5563",
+        "type": "color",
+        "description": "밝은 경계선 (gray-600)"
+      },
+      "accent": {
+        "value": "rgba(0, 255, 136, 0.3)",
+        "type": "color",
+        "description": "강조 경계선"
+      },
+      "error": {
+        "value": "rgba(239, 68, 68, 0.5)",
+        "type": "color",
+        "description": "에러 경계선"
+      }
+    }
+  },
+  "spacing": {
+    "page": {
+      "x": {
+        "value": "24px",
+        "type": "dimension",
+        "description": "페이지 좌우 여백"
+      },
+      "top": {
+        "value": "32px",
+        "type": "dimension",
+        "description": "페이지 상단 여백"
+      },
+      "bottom": {
+        "value": "24px",
+        "type": "dimension",
+        "description": "페이지 하단 여백"
+      }
+    },
+    "card": {
+      "padding": {
+        "value": "16px",
+        "type": "dimension",
+        "description": "카드 내부 여백"
+      },
+      "gap": {
+        "value": "12px",
+        "type": "dimension",
+        "description": "카드 내부 요소 간격"
+      }
+    },
+    "section": {
+      "gap": {
+        "value": "32px",
+        "type": "dimension",
+        "description": "섹션 간 간격"
+      }
+    },
+    "component": {
+      "gap": {
+        "value": "16px",
+        "type": "dimension",
+        "description": "컴포넌트 간 간격"
+      }
+    },
+    "navigation": {
+      "height": {
+        "value": "80px",
+        "type": "dimension",
+        "description": "하단 네비게이션 높이"
+      },
+      "safe-space": {
+        "value": "96px",
+        "type": "dimension",
+        "description": "네비게이션 겹침 방지 여백"
+      }
+    }
+  },
+  "typography": {
+    "heading": {
+      "h1": {
+        "size": {
+          "value": "24px",
+          "type": "dimension",
+          "description": "페이지 타이틀"
+        },
+        "weight": {
+          "value": 500,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      },
+      "h2": {
+        "size": {
+          "value": "20px",
+          "type": "dimension",
+          "description": "섹션 헤더"
+        },
+        "weight": {
+          "value": 500,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      },
+      "h3": {
+        "size": {
+          "value": "18px",
+          "type": "dimension",
+          "description": "카드 타이틀"
+        },
+        "weight": {
+          "value": 500,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      }
+    },
+    "body": {
+      "base": {
+        "size": {
+          "value": "16px",
+          "type": "dimension",
+          "description": "기본 텍스트"
+        },
+        "weight": {
+          "value": 400,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      },
+      "small": {
+        "size": {
+          "value": "14px",
+          "type": "dimension",
+          "description": "보조 텍스트"
+        },
+        "weight": {
+          "value": 400,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      },
+      "xs": {
+        "size": {
+          "value": "12px",
+          "type": "dimension",
+          "description": "라벨/뱃지"
+        },
+        "weight": {
+          "value": 500,
+          "type": "number"
+        },
+        "lineHeight": {
+          "value": 1.5,
+          "type": "number"
+        }
+      }
+    }
+  },
+  "border-radius": {
+    "card": {
+      "value": "16px",
+      "type": "dimension",
+      "description": "카드 모서리"
+    },
+    "button": {
+      "value": "12px",
+      "type": "dimension",
+      "description": "버튼 모서리"
+    },
+    "input": {
+      "value": "12px",
+      "type": "dimension",
+      "description": "입력 필드 모서리"
+    },
+    "badge": {
+      "value": "9999px",
+      "type": "dimension",
+      "description": "뱃지 모서리 (완전 둥글게)"
+    }
+  },
+  "sizing": {
+    "button": {
+      "height": {
+        "value": "56px",
+        "type": "dimension",
+        "description": "버튼 높이"
+      },
+      "min-touch": {
+        "value": "44px",
+        "type": "dimension",
+        "description": "최소 터치 영역"
+      }
+    },
+    "icon": {
+      "small": {
+        "value": "16px",
+        "type": "dimension",
+        "description": "작은 아이콘"
+      },
+      "base": {
+        "value": "20px",
+        "type": "dimension",
+        "description": "기본 아이콘"
+      },
+      "medium": {
+        "value": "24px",
+        "type": "dimension",
+        "description": "중간 아이콘"
+      },
+      "large": {
+        "value": "32px",
+        "type": "dimension",
+        "description": "큰 아이콘"
+      }
+    }
+  },
+  "animation": {
+    "transition": {
+      "fast": {
+        "value": "0.15s",
+        "type": "duration",
+        "description": "빠른 전환"
+      },
+      "base": {
+        "value": "0.2s",
+        "type": "duration",
+        "description": "기본 전환"
+      },
+      "slow": {
+        "value": "0.3s",
+        "type": "duration",
+        "description": "느린 전환"
+      }
+    },
+    "easing": {
+      "default": {
+        "value": "ease-in-out",
+        "type": "string",
+        "description": "기본 easing"
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+package com.soon.arrival;
+
+import android.content.Intent;
+import android.os.Bundle;
+import android.util.Log;
+import android.webkit.WebView;
+import androidx.core.view.WindowCompat;
+import com.getcapacitor.BridgeActivity;
+
+public class MainActivity extends BridgeActivity {
+    private static final String TAG = "MainActivity";
+    
+    // Force rebuild: V2 update check
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        // Register custom plugins BEFORE super.onCreate to ensure they are available at initialization
+        registerPlugin(OverlayPlugin.class);
+        registerPlugin(TripNotificationPlugin.class);
+        registerPlugin(LocalSmsPlugin.class);
+        registerPlugin(ToastPlugin.class);
+        registerPlugin(OneStorePlugin.class); // [New] IAP Integration
+
+        super.onCreate(savedInstanceState);
+        
+        // Enable WebView debugging
+        WebView.setWebContentsDebuggingEnabled(true);
+        
+        // Clear WebView cache to ensure fresh load
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            this.bridge.getWebView().clearCache(true);
+        }
+        
+        // Disable edge-to-edge to prevent status bar overlap
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        
+        // Handle notification intent
+        handleNotificationIntent(getIntent());
+    }
+    
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNotificationIntent(intent);
+    }
+    
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        
+        String openScreen = intent.getStringExtra("openScreen");
+        Log.d(TAG, "handleNotificationIntent: openScreen=" + openScreen);
+        
+        if ("active".equals(openScreen)) {
+            // Navigate to NavigationActive screen via JavaScript
+            if (this.bridge != null && this.bridge.getWebView() != null) {
+                this.bridge.getWebView().post(() -> {
+                    String js = "window.location.hash = '#/navigation-active';";
+                    this.bridge.getWebView().evaluateJavascript(js, null);
+                    Log.d(TAG, "Navigated to NavigationActive screen");
+                });
+            }
+            // Clear the intent extra to prevent repeated navigation
+            intent.removeExtra("openScreen");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+         // Forward to OneStorePlugin singleton strictly for Purchase Flow
+        if (com.soon.arrival.OneStorePlugin.instance != null) {
+            if (com.soon.arrival.OneStorePlugin.instance.handleActivityResult(requestCode, resultCode, data)) {
+                return;
+            }
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+}

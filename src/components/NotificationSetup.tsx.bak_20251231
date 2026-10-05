@@ -1,0 +1,605 @@
+import { useState, useEffect, useRef } from 'react';
+import { ChevronLeft, MapPin, User, Check, Search, X, Loader2, Plus } from 'lucide-react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import type { Trip, Screen, Contact, SetupFormData, NavigationInfo } from '../App';
+import { getCurrentPosition } from '../utils/capacitor-plugins';
+import { searchPoiKakao, getRouteInfoKakao, reverseGeocodeKakao } from '../utils/kakao-service';
+import { getRouteInfoNaver } from '../utils/naver-service';
+import { DestinationSearch } from './DestinationSearch';
+
+interface NotificationSetupProps {
+  onBack: () => void;
+  onComplete: (trip: Trip) => void;
+  onNavigate: (screen: Screen) => void;
+  selectedContacts: Contact[];
+  setSelectedContacts: (contacts: Contact[]) => void;
+  setupFormData: SetupFormData;
+  setSetupFormData: (data: SetupFormData) => void;
+}
+
+interface PlacePrediction {
+  description: string;
+  place_id: string;
+  structured_formatting?: {
+    main_text: string;
+    secondary_text: string;
+  };
+  lat?: number;
+  lng?: number;
+  distance?: number;
+}
+
+// Simple type alias for Kakao results
+type KakaoPoiResult = any;
+
+// --- UI Components (Extracted to prevent re-renders) ---
+const StepperItem = ({ step, label, activeStep, scrollToStep }: { step: number, label: string, activeStep: number, scrollToStep: (s: number) => void }) => {
+  const isActive = activeStep === step;
+  const isCompleted = step < activeStep;
+  return (
+    <div
+      onClick={() => scrollToStep(step)}
+      className={`flex items-center justify-center h-10 px-4 rounded-full border-2 text-sm font-bold transition-all cursor-pointer z-10 
+        ${isActive
+          ? 'bg-app-accent border-app-accent text-app-primary scale-105 shadow-lg shadow-app-accent/20'
+          : isCompleted
+            ? 'bg-app-secondary border-app-accent text-app-accent'
+            : 'bg-app-secondary border-gray-700 text-gray-500'}`}
+    >
+      {isCompleted ? <Check className="w-4 h-4" /> : <span>{step}</span>}
+      {isActive && <span className="ml-2 transition-all">{label}</span>}
+    </div>
+  );
+};
+
+const SectionCard = ({ step, title, myRef, activeStep, children }: any) => (
+  <div ref={myRef} className={`bg-app-secondary border rounded-2xl p-6 transition-all duration-300 ${activeStep === step ? 'border-app-accent ring-1 ring-app-accent/20' : 'border-border'}`}>
+    <div className="flex items-center gap-3 mb-6">
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shadow-md transition-colors ${activeStep >= step ? 'bg-app-accent text-app-primary' : 'bg-gray-700 text-gray-400'}`}>
+        {step}
+      </div>
+      <h2 className={`text-xl font-medium ${activeStep >= step ? 'text-white' : 'text-gray-500'}`}>{title}</h2>
+    </div>
+    <div>
+      {children}
+    </div>
+  </div>
+);
+
+export function NotificationSetup({ onBack, onComplete, onNavigate, selectedContacts, setSelectedContacts, setupFormData, setSetupFormData }: NotificationSetupProps) {
+  // --- State: Active Step ---
+  const [activeStep, setActiveStep] = useState(1);
+
+  // --- Refs ---
+  const containerRef = useRef<HTMLDivElement>(null);
+  const step1Ref = useRef<HTMLDivElement>(null);
+  const step2Ref = useRef<HTMLDivElement>(null);
+  const step3Ref = useRef<HTMLDivElement>(null);
+
+  // --- State: Data ---
+  const [departure, setDeparture] = useState(setupFormData.departure || '현재 위치');
+  const [destination, setDestination] = useState(setupFormData.destination);
+  const [selectedDestinationForNav, setSelectedDestinationForNav] = useState<PlacePrediction | null>(setupFormData.selectedDestinationForNav || null);
+  const [recipient, setRecipient] = useState(setupFormData.recipient || '');
+  const [targetDistance, setTargetDistance] = useState<number>(setupFormData.targetDistance || 10);
+
+  // Advanced Trigger State
+  const [triggerType, setTriggerType] = useState<'time' | 'waypoint'>('time');
+  const [triggerValue, setTriggerValue] = useState<number | string>(10);
+
+  // Multi-Waypoint State (Max 3)
+  const [selectedWaypoints, setSelectedWaypoints] = useState<KakaoPoiResult[]>([]);
+
+  // --- State: UI ---
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchMode, setSearchMode] = useState<'destination' | 'waypoint'>('destination'); // New Search Mode
+  const [isLoading, setIsLoading] = useState(false);
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false); // New Success State
+
+  // --- Scroll Detection Logic ---
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!containerRef.current || !step1Ref.current || !step2Ref.current || !step3Ref.current) return;
+
+      const containerTop = containerRef.current.scrollTop + 150; // Offset for header
+      const step1Top = step1Ref.current.offsetTop;
+      const step2Top = step2Ref.current.offsetTop;
+      const step3Top = step3Ref.current.offsetTop;
+
+      if (containerTop >= step3Top - 50) {
+        if (activeStep !== 3) setActiveStep(3);
+      } else if (containerTop >= step2Top - 50) {
+        if (activeStep !== 2) setActiveStep(2);
+      } else {
+        if (activeStep !== 1) setActiveStep(1);
+      }
+    };
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+      return () => container.removeEventListener('scroll', handleScroll);
+    }
+  }, [activeStep]);
+
+  // --- Sync Effects ---
+  useEffect(() => {
+    setSetupFormData({
+      ...setupFormData,
+      departure,
+      destination,
+      recipient,
+      selectedDestinationForNav,
+      targetDistance,
+      enableArrival: true,
+      enableDeparture: false,
+    });
+  }, [departure, destination, recipient, selectedDestinationForNav, targetDistance]);
+
+  // --- Logic ---
+  const prepareNavigationInfo = async (prediction: PlacePrediction): Promise<NavigationInfo | null> => {
+    try {
+      const position = await getCurrentPosition();
+      if (!position) throw new Error('위치 정보를 가져올 수 없습니다.');
+      const currentLat = position.latitude;
+      const currentLng = position.longitude;
+
+      const departureAddress = await reverseGeocodeKakao(currentLat, currentLng) || '현재 위치';
+
+      let destLat = prediction.lat;
+      let destLng = prediction.lng;
+
+      if (!destLat || !destLng) {
+        const results = await searchPoiKakao(prediction.description);
+        if (results && results.length > 0) {
+          destLat = results[0].lat;
+          destLng = results[0].lng;
+        } else {
+          throw new Error('도착지 좌표를 가져올 수 없습니다.');
+        }
+      }
+
+      /*
+       * [Hybrid Strategy]
+       * 1. Search: Kakao (already done above)
+       * 2. Route/ETA: Naver (Priority) -> Kakao (Fallback)
+       */
+
+      let distance = 0;
+      let durationMinutes = 0;
+
+      // Try Naver first
+      const naverRoute = await getRouteInfoNaver(currentLat, currentLng, destLat, destLng);
+
+      if (naverRoute) {
+        console.log('[Hybrid] Using Naver Route Data');
+        distance = naverRoute.distance;
+        durationMinutes = Math.round(naverRoute.duration / 1000 / 60); // ms -> min
+      } else {
+        // Fallback to Kakao
+        console.warn('[Hybrid] Naver Routing Failed, Falling back to Kakao');
+        const kakaoRoute = await getRouteInfoKakao(currentLat, currentLng, destLat, destLng);
+        if (kakaoRoute) {
+          distance = kakaoRoute.distance;
+          durationMinutes = Math.round(kakaoRoute.duration / 60); // sec -> min
+        } else {
+          throw new Error('경로 정보를 가져올 수 없습니다 (Naver & Kakao 실패).');
+        }
+      }
+
+      const placeName = prediction.structured_formatting?.main_text || prediction.description;
+      const formattedPlaceName = placeName.replace('대한민국 ', '').trim();
+
+      return {
+        app: 'GPS 추적',
+        departure: departureAddress,
+        destination: formattedPlaceName,
+        distance: distance / 1000,
+        estimatedTime: durationMinutes,
+        startLat: currentLat,
+        startLng: currentLng,
+        destLat: destLat,
+        destLng: destLng,
+      };
+    } catch (error: any) {
+      console.error("GPS Setup Error", error);
+      alert(`준비 실패: ${error.message || '알 수 없는 오류'}`);
+      return null;
+    }
+  };
+
+  const scrollToStep = (step: number) => {
+    setActiveStep(step); // Immediate visual update
+    if (step === 1) step1Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (step === 2) step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (step === 3) step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+
+
+  const handleStartReservation = async () => {
+    setIsLoading(true);
+    if (!selectedDestinationForNav) {
+      setIsLoading(false);
+      return alert('도착지가 선택되지 않았습니다.');
+    }
+
+    // Validation: Require at least one recipient
+    const hasRecipient = recipient.trim().length > 0 || selectedContacts.length > 0;
+    if (!hasRecipient) {
+      setIsLoading(false);
+      alert('받는 사람(연락처)을 입력해야 합니다.');
+      scrollToStep(2); // Auto-scroll to contact section
+      alert('받는 사람(연락처)을 입력해야 합니다.');
+      scrollToStep(2); // Auto-scroll to contact section
+      return;
+    }
+
+    // Validation: Check for Valid Coordinates
+    if (!selectedDestinationForNav.lat || !selectedDestinationForNav.lng || selectedDestinationForNav.lat === 0 || selectedDestinationForNav.lng === 0) {
+      setIsLoading(false);
+      alert('도착지 좌표 정보가 올바르지 않습니다.\n다시 검색하여 선택해주세요.');
+      return;
+    }
+
+    // 0. Prepare Info first
+    const navInfo = await prepareNavigationInfo(selectedDestinationForNav);
+
+    if (!navInfo) {
+      setIsLoading(false);
+      return; // Error alert handled in prepareNavigationInfo
+    }
+
+    // 1. Show Success Overlay
+    setShowSuccessOverlay(true);
+
+    // 2. Wait 2 seconds then finalize
+    setTimeout(() => {
+      // Combine manual input and selected contacts
+      const manualRecipients = recipient.split(',').map(r => r.trim()).filter(Boolean);
+      const contactRecipients = selectedContacts.map(c => {
+        const phone = c.phoneNumber || c.phone;
+        return phone ? `${c.name} (${phone})` : null;
+      }).filter(Boolean);
+
+      const finalRecipientString = [...new Set([...manualRecipients, ...contactRecipients])].join(',');
+
+      const trip: Trip = {
+        id: Date.now().toString(),
+        departure: navInfo.departure,
+        destination: navInfo.destination,
+        notifications: [{
+          id: Date.now().toString() + '_arr',
+          type: 'arrival',
+          condition: navInfo.distance >= 10.0
+            ? { type: 'time', value: 10, unit: '분' } // Long/Medium: 10 mins before
+            : { type: 'distance', value: 1.0, unit: 'km' }, // Short: 1km before
+          message: navInfo.distance >= 10.0
+            ? '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.'
+            : '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 5분 이내 도착합니다.', // Fixed message for short distance
+          recipient: finalRecipientString,
+          status: 'pending'
+        }],
+        status: 'planning',
+        estimatedTime: navInfo.estimatedTime,
+        estimatedDistance: navInfo.distance,
+        recipient: finalRecipientString,
+        createdAt: new Date().toISOString(),
+        startLat: navInfo.startLat,
+        startLng: navInfo.startLng,
+        destinationLat: navInfo.destLat,
+        destinationLng: navInfo.destLng,
+        initialStatus: 'waiting', // Default to waiting (Smart Start)
+        triggerType: triggerType,
+        triggerValue: String(triggerValue),
+        // Serialize Waypoints (Array)
+        waypoints: JSON.stringify(selectedWaypoints.map(wp => ({
+          lat: Number(wp.y || wp.lat),
+          lng: Number(wp.x || wp.lng),
+          name: wp.name || wp.address
+        }))),
+      };
+
+      setIsLoading(false);
+      onComplete(trip); // Navigate and Add Trip
+    }, 2000);
+  };
+
+  const handleDestinationSelect = (result: any) => {
+    // Standardize 'place' object for Waypoints
+    const place = {
+      id: result.id || `loc-${Math.random().toString(36).substr(2, 9)}`,
+      name: result.name || result.address,
+      address: result.address,
+      lat: parseFloat(result.lat || result.y || 0),
+      lng: parseFloat(result.lng || result.x || 0),
+      x: parseFloat(result.lng || result.x || 0),
+      y: parseFloat(result.lat || result.y || 0)
+    };
+
+    // Standardize 'prediction' object for Navigation (Legacy)
+    const prediction: PlacePrediction = {
+      description: result.address,
+      place_id: place.id,
+      structured_formatting: { main_text: place.name, secondary_text: place.address },
+      lat: place.lat,
+      lng: place.lng,
+      distance: result.distance
+    };
+
+    if (searchMode === 'destination') {
+      setSelectedDestinationForNav(prediction);
+      setDestination(place.name || place.address);
+
+      // Auto-move to next step
+      setIsSearching(false);
+      setTimeout(() => {
+        setActiveStep(2);
+        step2Ref.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+
+    } else if (searchMode === 'waypoint') {
+      // Add to Waypoints List (Max 3)
+      if (selectedWaypoints.length >= 3) {
+        alert('중간 경유지는 최대 3개까지만 설정 가능합니다.');
+        setIsSearching(false);
+        return;
+      }
+
+      // Avoid duplicates
+      if (selectedWaypoints.some(wp => wp.id === place.id)) {
+        alert('이미 추가된 위치입니다.');
+        setIsSearching(false);
+        return;
+      }
+
+      setSelectedWaypoints([...selectedWaypoints, place]);
+      setIsSearching(false);
+    }
+  };
+
+  // --- Success Overlay ---
+  // if (showSuccessOverlay) {
+  //   return (
+  //     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-app-primary text-white animate-in fade-in duration-300">
+  //       <div className="w-20 h-20 rounded-full bg-app-accent flex items-center justify-center mb-6 animate-bounce">
+  //         <Check className="w-10 h-10 text-app-primary stroke-[3]" />
+  //       </div>
+  //       <h2 className="text-2xl font-bold mb-2">예약 완료!</h2>
+  //       <p className="text-text-muted text-center">
+  //         성공적으로 예약되었습니다.<br />
+  //         잠시 후 목록으로 이동합니다.
+  //       </p>
+  //     </div>
+  //   );
+  // }
+
+  return (
+    <div className="flex flex-col h-full bg-app-primary text-text-primary relative">
+
+      {/* Search Overlay */}
+      {isSearching && (
+        <div className="absolute inset-0 z-50 bg-app-primary">
+          <DestinationSearch
+            onBack={() => setIsSearching(false)}
+            onSelect={handleDestinationSelect}
+            initialQuery={searchMode === 'destination' ? destination : ''}
+          />
+        </div>
+      )}
+
+      {/* Success Overlay */}
+      {showSuccessOverlay && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-app-primary text-white animate-in fade-in duration-300">
+          <div className="w-20 h-20 rounded-full bg-app-accent flex items-center justify-center mb-6 animate-bounce">
+            <Check className="w-10 h-10 text-app-primary stroke-[3]" />
+          </div>
+          <h2 className="text-2xl font-bold mb-2">예약 완료!</h2>
+          <p className="text-text-muted text-center">
+            성공적으로 예약되었습니다.<br />
+            잠시 후 목록으로 이동합니다.
+          </p>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="pt-safe px-4 h-16 flex items-center justify-between border-b border-border bg-app-primary sticky top-0 z-30 shadow-sm">
+        <button onClick={onBack} className="p-2 -ml-2 text-text-muted hover:text-white transition-colors">
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-bold">알림 예약</h1>
+        <div className="w-10"></div>
+      </header>
+
+      {/* Top Stepper */}
+      <div className="sticky top-16 z-20 bg-app-primary/95 backdrop-blur-sm px-6 py-4 border-b border-border">
+        <div className="flex items-center justify-between relative max-w-sm mx-auto">
+          <div className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-700 -translate-y-1/2" />
+          <div className="absolute top-1/2 left-0 h-0.5 bg-app-accent -translate-y-1/2 transition-all duration-300" style={{ width: `${((activeStep - 1) / 2) * 100}%` }} />
+          <StepperItem step={1} label="도착지" activeStep={activeStep} scrollToStep={scrollToStep} />
+          <StepperItem step={2} label="연락처" activeStep={activeStep} scrollToStep={scrollToStep} />
+          <StepperItem step={3} label="설정" activeStep={activeStep} scrollToStep={scrollToStep} />
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="px-6 py-8 space-y-6 pb-40">
+
+          {/* Step 1 */}
+          <SectionCard step={1} title="어디로 갈까요?" myRef={step1Ref} activeStep={activeStep}>
+            <div className="space-y-4">
+              <Label className="text-xs text-text-muted ml-1">출발지</Label>
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-gray-500" />
+                <Input value={departure} readOnly className="pl-10 h-14 bg-app-primary border-border text-gray-300 rounded-xl" />
+              </div>
+              <Label className="text-xs text-app-accent ml-1 font-bold">도착지 *</Label>
+              <div onClick={() => { setSearchMode('destination'); setIsSearching(true); }} className="relative cursor-pointer">
+                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-app-accent" />
+                <div className={`w-full h-14 flex items-center pl-12 pr-4 rounded-xl border-2 transition-all ${destination ? 'bg-app-primary border-app-accent text-white' : 'bg-app-primary border-app-accent/30 text-gray-500'}`}>
+                  {destination || '도착지 검색'}
+                  <Search className="ml-auto w-5 h-5" />
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Step 2 */}
+          <SectionCard step={2} title="누구에게 보낼까요?" myRef={step2Ref} activeStep={activeStep}>
+            <div className="space-y-4">
+              <div className="flex justify-between">
+                <Label className="text-xs text-text-muted">연락처 *</Label>
+                <button onClick={() => onNavigate('contacts')} className="text-xs text-app-accent font-bold flex gap-1"><User className="w-3 h-3" /> 가져오기</button>
+              </div>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+                <Input
+                  value={recipient}
+                  onChange={e => setRecipient(e.target.value)}
+                  placeholder="이름 또는 전화번호 직접 입력"
+                  className="pl-12 pr-10 h-14 bg-app-primary border-border text-white rounded-xl focus:border-app-accent"
+                />
+                {recipient && (
+                  <button
+                    onClick={() => {
+                      setRecipient('');
+                    }}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded-full bg-gray-700 text-gray-400 hover:bg-gray-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Vertical Contact List */}
+              {selectedContacts.length > 0 && (
+                <div className="space-y-2 mt-2">
+                  {selectedContacts.map((contact) => (
+                    <div key={contact.id} className="flex items-center justify-between p-3 bg-app-primary border border-border rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
+                          {contact.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-white">{contact.name}</div>
+                          <div className="text-xs text-gray-400">{contact.phoneNumber || contact.phone}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newContacts = selectedContacts.filter(c => c.id !== contact.id);
+                          setSelectedContacts(newContacts);
+                        }}
+                        className="p-2 text-gray-500 hover:text-red-400"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          {/* Step 3 */}
+          <SectionCard step={3} title="언제 보낼까요?" myRef={step3Ref} activeStep={activeStep}>
+            <div className="bg-gray-800 rounded-xl p-2 flex mb-4">
+              <button
+                onClick={() => setTriggerType('time')}
+                className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all ${triggerType === 'time' ? 'bg-app-accent text-app-primary shadow-lg' : 'text-gray-400'}`}
+              >
+                ⏰ 시간 기준
+              </button>
+              <button
+                onClick={() => setTriggerType('waypoint')}
+                className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all ${triggerType === 'waypoint' ? 'bg-app-accent text-app-primary shadow-lg' : 'text-gray-400'}`}
+              >
+                📍 위치 기준
+              </button>
+            </div>
+
+            {triggerType === 'time' && (
+              <div className="grid grid-cols-3 gap-3">
+                {[5, 10, 20].map(min => (
+                  <button
+                    key={min}
+                    onClick={() => { setTriggerValue(min); setTargetDistance(min); setActiveStep(3); }}
+                    className={`py-4 rounded-xl border-2 font-bold transition-all ${Number(triggerValue) === min
+                      ? 'border-app-accent bg-app-accent/10 text-app-accent'
+                      : 'border-gray-700 bg-gray-800 text-gray-400'}`}
+                  >
+                    {min}분 전
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {triggerType === 'waypoint' && (
+              <div className="space-y-3">
+                <p className="text-gray-400 text-sm">알림을 보낼 위치를 추가하세요 (최대 3개)</p>
+
+                {/* Selected Waypoints List */}
+                {selectedWaypoints.map((wp, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-app-secondary border border-app-accent rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-app-accent text-app-primary flex items-center justify-center font-bold">
+                        {index + 1}
+                      </div>
+                      <div>
+                        <div className="font-bold text-white">{wp.name}</div>
+                        <div className="text-xs text-gray-400 truncate max-w-[150px]">{wp.address}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedWaypoints(selectedWaypoints.filter(w => w.id !== wp.id))}
+                      className="p-2 text-gray-500 hover:text-red-400"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add Button */}
+                {selectedWaypoints.length < 3 && (
+                  <div
+                    onClick={() => {
+                      setSearchMode('waypoint');
+                      setIsSearching(true);
+                    }}
+                    className="p-4 border-2 border-gray-600 border-dashed rounded-xl text-center cursor-pointer hover:border-gray-400 transition-all flex items-center justify-center gap-2 text-gray-400 hover:text-white"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span>위치 추가하기</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="bg-black/30 rounded-xl p-4 mt-4 border border-white/5">
+              <p className="text-sm text-gray-300">
+                {triggerType === 'time'
+                  ? `"${destination || '목적지'} 부근 ${triggerValue}분 전에 메시지가 발송됩니다."`
+                  : `"${selectedWaypoints.length > 0 ? selectedWaypoints.map(w => w.name).join(', ') : '지정된 위치'}" 반경 500m 진입 시마다 메시지가 발송됩니다.`
+                }
+              </p>
+            </div>
+          </SectionCard>
+        </div>
+      </div>
+
+      {/* Fixed Bottom Button - Automatically updates based on scroll/step */}
+      <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 right-0 p-6 bg-app-primary/95 backdrop-blur-md border-t border-border z-[100]">
+        <Button
+          onClick={handleStartReservation}
+          disabled={isLoading}
+          className="w-full h-14 bg-gradient-to-r from-app-accent to-[#00cc6a] hover:brightness-110 text-app-primary text-xl font-bold rounded-2xl shadow-lg shadow-app-accent/20 transition-all active:scale-[0.98] disabled:opacity-50"
+        >
+          {isLoading ? <><Loader2 className="w-5 h-5 animate-spin mr-2" />생성 중...</> : '예약 완료하기'}
+        </Button>
+      </div>
+    </div>
+  );
+}

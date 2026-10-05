@@ -1,0 +1,891 @@
+import { useState, useEffect } from 'react';
+import { MapPin, Flag, Home, Plus, History, Settings as SettingsIcon, Bell, Minus, AlertCircle, User } from 'lucide-react';
+import { Button } from './ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Alert, AlertDescription } from './ui/alert';
+import type { Trip, Screen } from '../App';
+import { triggerSms } from '../services/sendSms';
+import { reverseGeocode } from '../utils/kakao';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
+import { Toast } from '../plugins/ToastPlugin';
+import Overlay from '../utils/overlay';
+import { TripNotification } from '../plugins/TripNotificationPlugin';
+import { calculateDistance } from '../utils/checkpoints';
+import { replaceTemplateVariables } from '../utils/smsTemplate'; // 임시: 직접 구현 필요
+
+interface NavigationActiveProps {
+  trip: Trip;
+  onUpdate: (trip: Trip) => void;
+  onCancel: () => void;
+  onNavigate: (screen: Screen) => void;
+}
+
+export function NavigationActive({ trip, onUpdate, onCancel, onNavigate }: NavigationActiveProps) {
+  const [currentTime, setCurrentTime] = useState(trip.estimatedTime || 15);
+  const [currentDistance, setCurrentDistance] = useState(trip.estimatedDistance || 8);
+  const [status, setStatus] = useState<'connecting' | 'active' | 'error'>('connecting');
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editedTime, setEditedTime] = useState(trip.estimatedTime || 15);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [isCancelCompleteDialogOpen, setIsCancelCompleteDialogOpen] = useState(false);
+
+  // ✅ 수동 발송 상태 (다이얼로그, 수신자, 메시지)
+  const [isManualSendDialogOpen, setIsManualSendDialogOpen] = useState(false);
+  const [manualRecipient, setManualRecipient] = useState('');
+  const [manualMessage, setManualMessage] = useState('');
+
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [watchId, setWatchId] = useState<number | null>(null);
+  const [locationNotificationSent, setLocationNotificationSent] = useState(false); // 위치 알림 전송 여부
+
+  // ✅ 시뮬레이션 모드
+  const [simulationMode, setSimulationMode] = useState(false);
+  const [simulatedProgress, setSimulatedProgress] = useState(0); // 0~100%
+
+  // ✅ 디버그 로그
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(false); // 기본값 false로 변경
+
+  // 로그 추가 헬퍼 함수
+  const addLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('ko-KR');
+    const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : '📝';
+    const logMessage = `[${timestamp}] ${icon} ${message}`;
+    console.log(logMessage);
+    setDebugLogs(prev => [...prev.slice(-49), logMessage]); // 최대 50개 유지
+  };
+
+  // Overlay Auto-Show logic (오류 로그 숨김)
+  useEffect(() => {
+    const initOverlay = async () => {
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          const { granted } = await Overlay.checkPermission();
+          if (granted) {
+            await Overlay.show();
+            addLog('Overlay 표시 성공', 'success');
+          }
+        } catch (e: any) {
+          // Overlay는 선택 사항이므로 오류 로그 숨김
+          console.log('Overlay not available (optional feature)');
+        }
+      }
+    };
+    initOverlay();
+
+    // Cleanup overlay on unmount
+    return () => {
+      Overlay.hide().catch(e => console.error('Overlay hide failed', e));
+    };
+  }, []);
+
+  // Kakao API Utils
+  // ✅ 목적지 좌표는 NotificationSetup에서 이미 받아옴 (geocoding 불필요)
+
+  // GPS 추적 시작
+  useEffect(() => {
+    // 백그라운드 서비스 시작
+    const startBackgroundService = async () => {
+      try {
+        addLog('백그라운드 서비스 시작 중...', 'info');
+
+        await TripNotification.startNotification({
+          tripData: {
+            destination: trip.destination,
+            recipient: trip.recipient,
+            apiKey: import.meta.env.VITE_TMAP_API_KEY, // Pass Kakao API key
+            timeRemaining: currentTime,
+            distance: currentDistance,
+            destLat: trip.destinationLat || 0,
+            destLng: trip.destinationLng || 0
+          }
+        });
+
+        addLog('백그라운드 서비스 시작 성공', 'success');
+      } catch (error: any) {
+        console.error('백그라운드 서비스 시작 실패:', error);
+        addLog(`백그라운드 서비스 실패: ${error.message}`, 'error');
+      }
+    };
+
+    startBackgroundService();
+
+    // GPS 권한 확인 및 위치 추적 시작
+    const startTracking = async (useHighAccuracy = true) => {
+      try {
+        const permission = await Geolocation.checkPermissions();
+        if (permission.location !== 'granted') {
+          const request = await Geolocation.requestPermissions();
+          if (request.location !== 'granted') {
+            setErrorMessage('GPS 권한이 거부되었습니다. 앱 설정에서 권한을 허용해주세요.');
+            setStatus('error');
+            addLog('GPS 권한 거부됨', 'error');
+            return;
+          }
+        }
+
+        console.log(`🛰️ GPS 위치 추적 시작... (정밀도: ${useHighAccuracy ? '높음' : '낮음'})`);
+        addLog(`GPS 추적 시작 (정밀도: ${useHighAccuracy ? '높음' : '낮음'})`, 'info');
+
+        if (watchId !== null) {
+          Geolocation.clearWatch({ id: watchId.toString() });
+        }
+
+        const id = await Geolocation.watchPosition(
+          {
+            enableHighAccuracy: useHighAccuracy,
+            timeout: useHighAccuracy ? 10000 : 30000,
+            maximumAge: 0
+          },
+          (position, err) => {
+            if (err) {
+              console.error('❌ GPS 오류:', err);
+              if (useHighAccuracy) {
+                console.log('⚠️ 고정밀 GPS 실패, 일반 GPS로 전환 시도...');
+                addLog('고정밀 GPS 실패, 일반 GPS로 전환 시도', 'warning');
+                if (watchId !== null) Geolocation.clearWatch({ id: watchId.toString() });
+                startTracking(false); // Retry with low accuracy
+                return;
+              }
+
+              let message = 'GPS 위치를 가져올 수 없습니다.';
+              // Capacitor Geolocation error handling
+              setErrorMessage(`${message} (${err.message})`);
+              setStatus('error');
+              addLog(`GPS 오류: ${err.message}`, 'error');
+              return;
+            }
+
+            if (position) {
+              console.log('✅ 위치 업데이트:', position.coords.latitude, position.coords.longitude);
+              addLog(`위치 업데이트: ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`, 'success');
+              if (status === 'connecting' || status === 'error') {
+                setStatus('active');
+                const updatedTrip = { ...trip, status: 'active' as const, startTime: new Date() };
+                onUpdate(updatedTrip);
+                console.log('✅ GPS 연결 성공!');
+                addLog('GPS 연결 성공', 'success');
+
+                // Start foreground notification
+                TripNotification.startNotification({
+                  tripData: {
+                    destination: trip.destination,
+                    timeRemaining: Math.floor(currentTime),
+                    distance: Math.floor(currentDistance)
+                  }
+                }).catch(e => console.error('Failed to start notification:', e));
+              }
+              const currentLat = position.coords.latitude;
+              const currentLng = position.coords.longitude;
+              calculateDistanceAndTime(currentLat, currentLng);
+            }
+          }
+        );
+        setWatchId(parseInt(id.toString())); // watchId might be string in capacitor
+      } catch (e) {
+        console.error('GPS Setup Error', e);
+        setErrorMessage('GPS 설정 중 오류가 발생했습니다.');
+        setStatus('error');
+      }
+    };
+
+    if (navigator.geolocation || Geolocation) {
+      // First try high accuracy
+      startTracking(true);
+    } else {
+      setErrorMessage('이 기기는 GPS를 지원하지 않습니다.');
+      setStatus('error');
+    }
+
+    // 컴포넌트 언마운트 시 위치 추적 중지
+    return () => {
+      if (watchId !== null) {
+        Geolocation.clearWatch({ id: watchId.toString() });
+        console.log('🛑 GPS 추적 중지');
+      }
+    };
+  }, [destinationCoords]); // Removed 'status' dependency to avoid re-triggering loop
+
+  // ✅ GPS 기반 거리/시간 계산 (API 호출 없음)
+  const calculateDistanceAndTime = (currentLat: number, currentLng: number) => {
+    if (!trip.startLat || !trip.startLng || !trip.estimatedDistance || !trip.estimatedTime) {
+      console.error('출발지 정보 또는 예상 거리/시간이 없습니다.');
+      return;
+    }
+
+    // ✅ 출발지로부터 이동 거리 계산 (하버사인 공식)
+    const traveledDistanceMeters = calculateDistance(
+      trip.startLat,
+      trip.startLng,
+      currentLat,
+      currentLng
+    );
+
+    const totalDistanceMeters = trip.estimatedDistance * 1000; // km → m
+    const totalTimeSeconds = trip.estimatedTime * 60; // 분 → 초
+
+    // ✅ 남은 거리 = 총 거리 - 이동 거리
+    const remainingDistanceMeters = Math.max(0, totalDistanceMeters - traveledDistanceMeters);
+    const remainingDistanceKm = remainingDistanceMeters / 1000;
+
+    // ✅ 남은 시간 = 총 시간 × (남은 거리 / 총 거리)
+    const remainingTimeSeconds = totalTimeSeconds * (remainingDistanceMeters / totalDistanceMeters);
+    const remainingTimeMinutes = remainingTimeSeconds / 60;
+
+    console.log(`📏 이동 거리: ${(traveledDistanceMeters / 1000).toFixed(2)}km`);
+    console.log(`📏 남은 거리: ${remainingDistanceKm.toFixed(2)}km`);
+    console.log(`⏱️ 남은 시간: ${remainingTimeMinutes.toFixed(1)}분`);
+
+    // 상태 업데이트
+    const prevTime = currentTime;
+    const prevDistance = currentDistance;
+
+    setCurrentDistance(remainingDistanceKm);
+    setCurrentTime(remainingTimeMinutes);
+
+    // Foreground 알림 업데이트
+    TripNotification.updateNotification({
+      tripData: {
+        destination: trip.destination,
+        timeRemaining: Math.floor(remainingTimeMinutes),
+        distance: Math.floor(remainingDistanceKm)
+      }
+    }).catch(e => console.error('Failed to update notification:', e));
+
+    // ✅ 알림 조건 체크 (기존 + 위치 기반)
+    checkNotificationConditions(
+      remainingTimeMinutes,
+      remainingDistanceKm,
+      prevTime,
+      prevDistance,
+      currentLat,
+      currentLng
+    );
+  };
+
+  // ✅ 위치 기반 알림 체크 (남은 시간 10~15분)
+  const checkLocationNotification = async (
+    remainingTimeMinutes: number,
+    currentLat: number,
+    currentLng: number
+  ) => {
+    // 이미 전송했으면 스킵
+    if (locationNotificationSent) return;
+
+    // 남은 시간이 10~15분 범위가 아니면 스킵
+    if (remainingTimeMinutes < 10 || remainingTimeMinutes > 15) return;
+
+    console.log('✅ 위치 알림 조건 충족: 남은 시간', Math.floor(remainingTimeMinutes), '분');
+
+    try {
+      // ✅ Reverse Geocoding으로 현재 위치의 도로명/지명 가져오기
+      const locationName = await reverseGeocode(currentLat, currentLng);
+
+      if (!locationName) {
+        console.error('위치 정보를 가져올 수 없습니다.');
+        return;
+      }
+
+      console.log('📍 현재 위치:', locationName);
+
+      // ✅ 문자 메시지 생성
+      const message = `${locationName}을(를) 지나가고 있습니다. ${Math.floor(remainingTimeMinutes)}분 후 도착합니다.`;
+
+      // ✅ 수신자 전화번호 추출
+      const phoneNumbers = trip.recipient?.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+
+      if (phoneNumbers && phoneNumbers.length > 0) {
+        const cleanRecipients = phoneNumbers.map((p: string) => p.replace(/-/g, '')).join(',');
+
+        // ✅ SMS 전송
+        const success = await triggerSms(message, cleanRecipients);
+
+        if (success) {
+          alert(`📍 위치 알림 전송: ${message}`);
+          console.log('✅ 위치 알림 문자 전송 성공');
+          setLocationNotificationSent(true);
+        } else {
+          console.error('❌ 위치 알림 문자 전송 실패');
+        }
+      } else {
+        console.warn('발송할 유효한 전화번호가 없습니다:', trip.recipient);
+      }
+    } catch (error) {
+      console.error('위치 알림 오류:', error);
+    }
+  };
+
+  // 알림 조건 체크 및 발송
+  const checkNotificationConditions = (
+    newTime: number,
+    newDistance: number,
+    prevTime: number,
+    prevDistance: number,
+    currentLat?: number, // ✅ 추가
+    currentLng?: number  // ✅ 추가
+  ) => {
+    // 기존 알림 로직
+    trip.notifications.forEach(notification => {
+      if (notification.status !== 'pending') return;
+
+      let shouldSend = false;
+
+      if (notification.type === 'arrival') {
+        // 도착 알림
+        if (notification.condition.type === 'time') {
+          // 시간 조건: 이전엔 조건보다 컸는데, 지금은 조건 이하
+          shouldSend = prevTime > notification.condition.value && newTime <= notification.condition.value;
+        } else {
+          // 거리 조건
+          shouldSend = prevDistance > notification.condition.value && newDistance <= notification.condition.value;
+        }
+      } else {
+        // 출발 알림 (출발 후 N분/km)
+        const elapsedTime = (trip.estimatedTime || 0) - newTime;
+        const traveledDistance = (trip.estimatedDistance || 0) - newDistance;
+
+        if (notification.condition.type === 'time') {
+          shouldSend = elapsedTime >= notification.condition.value;
+        } else {
+          shouldSend = traveledDistance >= notification.condition.value;
+        }
+      }
+
+      if (shouldSend) {
+        // 알림 발송
+        sendNotification(notification);
+      }
+    });
+
+    // ✅ 위치 기반 알림 (새로운 로직)
+    if (currentLat && currentLng) {
+      checkLocationNotification(newTime, currentLat, currentLng);
+    }
+  };
+
+  // 알림 발송
+  const sendNotification = async (notification: any) => {
+    const updatedNotification = { ...notification, status: 'sent' as const, sentAt: new Date() };
+    const updatedTrip = {
+      ...trip,
+      notifications: trip.notifications.map(n =>
+        n.id === notification.id ? updatedNotification : n
+      ),
+    };
+    onUpdate(updatedTrip);
+
+    // SMS 자동 전송
+    // 수신자 문자열에서 전화번호만 추출 (예: "홍길동 (010-1234-5678)" -> "01012345678")
+    const phoneNumbers = notification.recipient.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+
+    if (phoneNumbers && phoneNumbers.length > 0) {
+      // 대시 제거 후 콤마로 연결
+      const cleanRecipients = phoneNumbers.map((p: string) => p.replace(/-/g, '')).join(',');
+
+      // 템플릿 변수 치환
+      const finalMessage = replaceTemplateVariables(notification.message, {
+        time: Math.floor(currentTime),
+        driverName: '운전자', // TODO: Get from user profile
+        destination: trip.destination,
+        departure: trip.departure
+      });
+
+      const success = await triggerSms(finalMessage, cleanRecipients);
+
+      if (success) {
+        alert('예약 문자가 전송되었습니다!');
+      } else {
+        alert('❌ 알림 발송 실패');
+      }
+    } else {
+      console.warn('발송할 유효한 전화번호가 없습니다:', notification.recipient);
+      alert('❌ 발송 실패: 유효한 전화번호를 찾을 수 없습니다.');
+    }
+  };
+  // ✅ 연락처 불러오기
+  const handlePickContact = async () => {
+    try {
+      const { Contacts } = await import('@capacitor-community/contacts');
+
+      const result = await Contacts.pickContact({
+        projection: {
+          name: true,
+          phones: true,
+        }
+      });
+
+      if (result.contact && result.contact.phones && result.contact.phones.length > 0) {
+        const phone = result.contact.phones[0].number;
+        if (phone) {
+          setManualRecipient(phone);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to pick contact:', error);
+      // 토스트 메시지 등 추가 가능
+    }
+  };
+
+  const handleOpenManualSend = () => {
+    // 메시지 미리 생성
+    const timeText = currentTime >= 60
+      ? `${Math.floor(currentTime / 60)}시간 ${Math.floor(currentTime % 60)}분`
+      : `${Math.floor(currentTime)}분`;
+    const msg = `현재 ${trip.destination}까지 ${timeText} (${currentDistance.toFixed(1)}km) 남았습니다.`;
+
+    setManualMessage(msg);
+    // 기본 수신자 설정 (trip.recipient에서 번호만 추출)
+    const phoneNumbers = trip.recipient?.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+    if (phoneNumbers && phoneNumbers.length > 0) {
+      setManualRecipient(phoneNumbers[0]);
+    } else {
+      setManualRecipient(trip.recipient || '');
+    }
+
+    setIsManualSendDialogOpen(true);
+  };
+
+  const handleConfirmManualSend = async () => {
+    setIsManualSendDialogOpen(false);
+
+    try {
+      addLog('수동 발송 시작', 'info');
+      addLog(`수신자: ${manualRecipient}`, 'info');
+
+      if (!manualRecipient) {
+        await Toast.show({ text: '수신자를 입력해주세요', duration: 'short' });
+        return;
+      }
+
+      const cleanRecipient = manualRecipient.replace(/-/g, '');
+      const success = await triggerSms(manualMessage, cleanRecipient);
+
+      if (success) {
+        await Toast.show({ text: '✅ 문자 전송 성공', duration: 'short' });
+        addLog('수동 발송 성공', 'success');
+      } else {
+        await Toast.show({ text: '❌ 문자 전송 실패', duration: 'short' });
+        addLog('수동 발송 실패', 'error');
+      }
+    } catch (error: any) {
+      addLog(`수동 발송 오류: ${error.message || error}`, 'error');
+      await Toast.show({ text: `❌ 오류 발생: ${error.message || error}`, duration: 'long' });
+    }
+  };
+};
+
+const handleSaveEdit = () => {
+  const updatedTrip = { ...trip, estimatedTime: editedTime };
+  onUpdate(updatedTrip);
+  setIsEditDialogOpen(false);
+};
+
+const handleCancelTrip = () => {
+  // GPS 추적 중지
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+  }
+
+  // Stop foreground notification
+  TripNotification.stopNotification().catch(e => console.error('Failed to stop notification:', e));
+
+  onCancel();
+  setIsCancelDialogOpen(false);
+  setIsCancelCompleteDialogOpen(true);
+};
+
+const handleCancelComplete = () => {
+  setIsCancelCompleteDialogOpen(false);
+  onNavigate('home');
+};
+
+return (
+  <div className="flex flex-col min-h-screen bg-[#0f2920] text-white">
+    {/* Header */}
+    <header className="px-6 py-2">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 flex items-center justify-center">
+          {status === 'connecting' ? (
+            <div className="w-6 h-6 border-2 border-[#00ff88] border-t-transparent rounded-full animate-spin" />
+          ) : status === 'active' ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-[#00ff88]">
+              <path d="M9 11L12 14L22 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 12V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <AlertCircle className="w-6 h-6 text-[#ff6b6b]" />
+          )}
+        </div>
+        <span className={status === 'error' ? 'text-[#ff6b6b]' : 'text-[#00ff88]'}>
+          {status === 'connecting' ? 'GPS 연결 중...' : status === 'active' ? 'GPS 연결됨' : 'GPS 오류'}
+        </span>
+      </div>
+    </header>
+
+    {/* Error Alert */}
+    {status === 'error' && errorMessage && (
+      <div className="px-6 pb-4">
+        <Alert className="bg-[#3d2626] border-[#ff6b6b]">
+          <AlertCircle className="h-4 w-4 text-[#ff6b6b]" />
+          <AlertDescription className="text-white ml-2">
+            {errorMessage}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )}
+
+    {/* Location Info */}
+    <div className="px-6 py-4 space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 bg-[#1a3d32] rounded-2xl flex items-center justify-center">
+          <Flag className="w-6 h-6 text-gray-400" />
+        </div>
+        <span className="text-gray-300">{trip.departure}</span>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 bg-[#00ff88] rounded-2xl flex items-center justify-center">
+          <MapPin className="w-6 h-6 text-[#0f2920]" />
+        </div>
+        <span className="text-white">{trip.destination}</span>
+      </div>
+    </div>
+
+    {/* Time Display */}
+    <div className="flex-1 flex flex-col items-center justify-center px-6">
+      <div className="text-center">
+        <div className="text-[#00ff88] tracking-tight" style={{ fontSize: '120px', lineHeight: 1, fontWeight: 700 }}>
+          {Math.floor(currentTime)}분
+        </div>
+        <div className="text-white mt-4" style={{ fontSize: '40px', fontWeight: 600 }}>
+          {currentDistance.toFixed(0)}km
+        </div>
+      </div>
+    </div>
+
+    {/* Reservation Details */}
+    <div className="px-6 pb-6">
+      <div className="space-y-3">
+        <div className="text-gray-400 text-sm mb-3">예약 내용</div>
+        {trip.notifications.map((notification) => (
+          <div
+            key={notification.id}
+            className="bg-[#1a3d32] rounded-2xl p-4 space-y-2"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${notification.status === 'sent' ? 'bg-[#00ff88]' :
+                  notification.status === 'failed' ? 'bg-[#ff6b6b]' :
+                    'bg-yellow-500'
+                  }`} />
+                <span className="text-white text-sm">
+                  {notification.type === 'arrival' ? '도착' : '출발'}{' '}
+                  {notification.condition.type === 'time' ?
+                    `${notification.condition.value}분 ${notification.type === 'arrival' ? '전' : '후'}` :
+                    `${notification.condition.value}km ${notification.type === 'arrival' ? '전' : '후'}`
+                  }
+                </span>
+              </div>
+              <span className={`text-xs px-2 py-1 rounded-lg ${notification.status === 'sent' ? 'bg-[#00ff88]/20 text-[#00ff88]' :
+                notification.status === 'failed' ? 'bg-[#ff6b6b]/20 text-[#ff6b6b]' :
+                  'bg-yellow-500/20 text-yellow-500'
+                }`}>
+                {notification.status === 'sent' ? '발송완료' :
+                  notification.status === 'failed' ? '실패' :
+                    '대기중'}
+              </span>
+            </div>
+            <div className="text-gray-300 text-sm pl-4">
+              {notification.message}
+            </div>
+            <div className="text-gray-400 text-xs pl-4">
+              수신자: {notification.recipient}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Action Buttons */}
+    <div className="px-6 pb-28 space-y-3">
+      <Button
+        onClick={handleEditReservation}
+        className="w-full bg-[#1a3d32] hover:bg-[#234a3d] text-white h-14 rounded-2xl border-0"
+      >
+        예약 수정하기
+      </Button>
+      <Button
+        onClick={handleOpenManualSend}
+        className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-14 rounded-2xl border-0"
+      >
+        수동 발송 (현재 위치 알림)
+      </Button>
+      {status === 'error' && (
+        <Button
+          onClick={() => {
+            setStatus('connecting');
+            setErrorMessage('');
+          }}
+          className="w-full bg-yellow-600 hover:bg-yellow-700 text-white h-12 rounded-2xl border-0"
+        >
+          GPS 재시도
+        </Button>
+      )}
+      <Button
+        onClick={() => setIsCancelDialogOpen(true)}
+        className="w-full bg-[#3d2626] hover:bg-[#4d3030] text-[#ff6b6b] h-14 rounded-2xl border-0"
+      >
+        예약 취소
+      </Button>
+    </div>
+
+    {/* Bottom Navigation - Shifted up for Ad Banner */}
+    <nav
+      className="fixed left-0 right-0 bg-[#0f2920] border-t border-gray-800"
+      style={{ bottom: '60px', position: 'fixed', left: 0, right: 0, zIndex: 50 }}
+    >
+      <div className="flex items-center justify-around h-20 max-w-lg mx-auto">
+        <button
+          onClick={() => onNavigate('home')}
+          className="flex flex-col items-center justify-center flex-1 space-y-1"
+        >
+          <Home className="w-6 h-6 text-gray-500" />
+          <span className="text-xs text-gray-500">홈</span>
+        </button>
+        <button
+          onClick={() => onNavigate('setup')}
+          className="flex flex-col items-center justify-center flex-1 space-y-1"
+        >
+          <Bell className="w-6 h-6 text-[#00ff88]" />
+          <span className="text-xs text-[#00ff88]">예약하기</span>
+        </button>
+        <button
+          onClick={() => onNavigate('list')}
+          className="flex flex-col items-center justify-center flex-1 space-y-1"
+        >
+          <History className="w-6 h-6 text-gray-500" />
+          <span className="text-xs text-gray-500">내역보기</span>
+        </button>
+        <button
+          onClick={() => onNavigate('settings')}
+          className="flex flex-col items-center justify-center flex-1 space-y-1"
+        >
+          <SettingsIcon className="w-6 h-6 text-gray-500" />
+          <span className="text-xs text-gray-500">설정</span>
+        </button>
+      </div>
+    </nav>
+
+    {/* Manual Send Dialog */}
+    <Dialog open={isManualSendDialogOpen} onOpenChange={setIsManualSendDialogOpen}>
+      <DialogContent className="bg-[#1a3d32] border-gray-700 text-white max-w-sm rounded-3xl">
+        <DialogHeader>
+          <DialogTitle className="text-center text-lg font-bold">문자 수동 발송</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm text-gray-400">받는 사람</label>
+            <div className="flex gap-2">
+              <input
+                type="tel"
+                value={manualRecipient}
+                onChange={(e) => setManualRecipient(e.target.value)}
+                className="flex-1 bg-[#0f2920] border-gray-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#00ff88]"
+                placeholder="010-0000-0000"
+              />
+              <Button
+                onClick={handlePickContact}
+                className="bg-[#234a3d] hover:bg-[#2c5c4d] text-[#00ff88] p-3 rounded-xl h-auto"
+              >
+                <User className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm text-gray-400">전송할 메시지</label>
+            <div className="bg-[#0f2920] rounded-xl p-4 text-sm text-gray-300 leading-relaxed">
+              {manualMessage}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Button
+            onClick={() => setIsManualSendDialogOpen(false)}
+            className="flex-1 bg-[#234a3d] hover:bg-[#2c5c4d] text-gray-300 h-12 rounded-xl border-0"
+          >
+            취소
+          </Button>
+          <Button
+            onClick={handleConfirmManualSend}
+            className="flex-1 bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-xl border-0 font-bold"
+          >
+            전송하기
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Edit Dialog */}
+    <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      <DialogContent className="bg-[#0f2920] border-2 border-gray-800 text-white">
+        <DialogHeader>
+          <DialogTitle className="text-white text-center">도착 시간 수정</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-6 py-4">
+          {/* 도착 시간 조정 */}
+          <div className="space-y-3">
+            <label className="text-gray-400 text-sm">예상 도착 시간</label>
+            <div className="flex items-center justify-between bg-transparent border-2 border-gray-700 rounded-2xl h-16 px-6">
+              <button
+                onClick={() => setEditedTime(Math.max(1, editedTime - 1))}
+                className="p-2 hover:bg-[#1a3d32] rounded-lg transition-colors"
+              >
+                <Minus className="w-5 h-5 text-[#00ff88]" />
+              </button>
+              <span className="text-xl">
+                <span className="text-[#00ff88]">{Math.floor(editedTime)}분</span>
+              </span>
+              <button
+                onClick={() => setEditedTime(editedTime + 1)}
+                className="p-2 hover:bg-[#1a3d32] rounded-lg transition-colors"
+              >
+                <Plus className="w-5 h-5 text-[#00ff88]" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 버튼 */}
+        <div className="flex gap-3 mt-4">
+          <Button
+            onClick={() => setIsEditDialogOpen(false)}
+            className="flex-1 bg-[#1a3d32] hover:bg-[#234a3d] text-white h-12 rounded-2xl border-0"
+          >
+            취소
+          </Button>
+          <Button
+            onClick={handleSaveEdit}
+            className="flex-1 bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-2xl border-0"
+          >
+            저장
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Cancel Confirmation Dialog */}
+    <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+      <DialogContent className="bg-[#0f2920] border-2 border-gray-800 text-white">
+        <DialogHeader>
+          <DialogTitle className="text-white text-center">예약 취소</DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <p className="text-gray-300 text-center">
+            예약을 취소하시겠습니까?<br />
+            설정된 알림이 모두 삭제됩니다.
+          </p>
+        </div>
+        <div className="flex gap-3 mt-4">
+          <Button
+            onClick={() => setIsCancelDialogOpen(false)}
+            className="flex-1 bg-[#1a3d32] hover:bg-[#234a3d] text-white h-12 rounded-2xl border-0"
+          >
+            돌아가기
+          </Button>
+          <Button
+            onClick={handleCancelTrip}
+            className="flex-1 bg-[#3d2626] hover:bg-[#4d3030] text-[#ff6b6b] h-12 rounded-2xl border-0"
+          >
+            취소
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Cancel Complete Dialog */}
+    <Dialog open={isCancelCompleteDialogOpen} onOpenChange={setIsCancelCompleteDialogOpen}>
+      <DialogContent className="bg-[#0f2920] border-2 border-gray-800 text-white" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle className="text-white text-center">취소 완료</DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <p className="text-gray-300 text-center">
+            예약이 취소되었습니다.
+          </p>
+        </div>
+        <div className="mt-4">
+          <Button
+            onClick={handleCancelComplete}
+            className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-2xl border-0"
+          >
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* ✅ 디버그 로그 패널 */}
+    <div className="fixed bottom-0 left-0 right-0 bg-black/95 border-t border-[#00ff88]/20 z-50">
+      <div
+        className="flex items-center justify-between px-4 py-2 cursor-pointer"
+        onClick={() => setShowDebugPanel(!showDebugPanel)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[#00ff88] text-sm font-bold">🔍 디버그 로그</span>
+          <span className="text-gray-400 text-xs">({debugLogs.length})</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const logText = debugLogs.join('\n');
+              navigator.clipboard.writeText(logText);
+              alert('로그가 클립보드에 복사되었습니다!');
+            }}
+            className="text-xs px-2 py-1 bg-[#00ff88]/20 text-[#00ff88] rounded"
+          >
+            복사
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setDebugLogs([]);
+              addLog('로그 초기화됨', 'info');
+            }}
+            className="text-xs px-2 py-1 bg-red-500/20 text-red-400 rounded"
+          >
+            초기화
+          </button>
+          <span className="text-[#00ff88]">{showDebugPanel ? '▼' : '▲'}</span>
+        </div>
+      </div>
+
+      {showDebugPanel && (
+        <div className="px-4 pb-4 max-h-64 overflow-y-auto">
+          <div className="bg-black/50 rounded p-2 font-mono text-xs">
+            {debugLogs.length === 0 ? (
+              <div className="text-gray-500 text-center py-4">로그가 없습니다</div>
+            ) : (
+              debugLogs.map((log, index) => (
+                <div
+                  key={index}
+                  className={`py-1 ${log.includes('✅') ? 'text-green-400' :
+                    log.includes('❌') ? 'text-red-400' :
+                      log.includes('⚠️') ? 'text-yellow-400' :
+                        'text-gray-300'
+                    }`}
+                >
+                  {log}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+);
+}

@@ -1,0 +1,142 @@
+import { useState } from 'react';
+import { Settings, LogOut, ChevronRight, User, Shield, HelpCircle, FileText, Bell, CreditCard } from 'lucide-react';
+import type { Screen, UserProfile } from '../App';
+
+interface MyPageProps {
+    onNavigate: (screen: Screen) => void;
+    userProfile: UserProfile;
+    isAdmin?: boolean;
+}
+
+export function MyPage({ onNavigate, userProfile, isAdmin }: MyPageProps) {
+    const [activeTab, setActiveTab] = useState<'all' | 'earned' | 'used'>('all');
+
+    // Use real point history
+    const pointHistory = userProfile.pointHistory || [];
+
+    const filteredHistory = pointHistory.filter(item => {
+        if (activeTab === 'all') return true;
+        return item.type === activeTab;
+    });
+
+    return (
+        <div className="flex flex-col w-full h-full bg-app-primary text-text-primary overflow-hidden">
+            {/* --- Header --- */}
+            <header className="pt-safe px-6 pb-6 bg-app-primary border-b border-border flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-app-secondary border-2 border-app-accent flex items-center justify-center overflow-hidden">
+                    <User className="w-8 h-8 text-text-muted" />
+                    {/* Image placeholder if available */}
+                </div>
+                <div className="flex-1">
+                    <h1 className="text-xl font-bold text-white">{userProfile.name}님</h1>
+                    <p className="text-sm text-text-muted">{userProfile.email}</p>
+                </div>
+                <button
+                    onClick={() => onNavigate('profile')}
+                    className="px-3 py-1.5 rounded-full bg-app-secondary border border-border text-xs text-text-secondary hover:bg-app-tertiary transition-colors"
+                >
+                    편집
+                </button>
+            </header>
+
+            {/* --- Content --- */}
+            <div className="flex-1 overflow-y-auto pb-32 px-6 pt-6 scrollbar-hide">
+
+                {/* Points Summary */}
+                <div className="bg-gradient-to-r from-app-secondary to-app-tertiary rounded-2xl p-6 mb-8 border border-border relative overflow-hidden">
+                    <div className="relative z-10">
+                        <span className="text-sm text-text-muted">현재 보유 포인트</span>
+                        <div className="text-3xl font-bold text-app-accent mt-1">{userProfile?.points?.toLocaleString() || 0} P</div>
+                    </div>
+                    <div className="absolute right-0 top-0 h-full w-1/3 bg-app-accent/5 skew-x-12"></div>
+                </div>
+
+                {/* Points Tabs */}
+                <div className="mb-6">
+                    <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                        <CreditCard className="w-5 h-5 text-app-accent" />
+                        포인트 내역
+                    </h2>
+                    <div className="flex p-1 bg-app-secondary rounded-xl mb-4">
+                        {(['all', 'earned', 'used'] as const).map((tab) => (
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === tab
+                                    ? 'bg-app-accent text-app-primary shadow-sm'
+                                    : 'text-text-muted hover:text-white'
+                                    }`}
+                            >
+                                {tab === 'all' ? '전체' : tab === 'earned' ? '적립' : '사용'}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="space-y-3">
+                        {filteredHistory.length > 0 ? (
+                            filteredHistory.map((item) => (
+                                <div key={item.id} className="bg-app-secondary border border-border rounded-xl p-4 flex justify-between items-center">
+                                    <div>
+                                        <div className="font-medium text-white mb-0.5">{item.description}</div>
+                                        <div className="text-xs text-text-muted">{item.date} | 잔액 {item.balance.toLocaleString()}P</div>
+                                    </div>
+                                    <div className={`font-bold ${item.type === 'earned' ? 'text-status-success' : 'text-status-error'}`}>
+                                        {item.type === 'earned' ? '+' : ''}{item.amount.toLocaleString()} P
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="text-center py-8 text-text-muted text-sm">
+                                내역이 없습니다.
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Settings Menu */}
+                <div className="mb-8">
+                    <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                        <Settings className="w-5 h-5 text-app-accent" />
+                        설정
+                    </h2>
+                    <div className="bg-app-secondary border border-border rounded-2xl overflow-hidden divide-y divide-border">
+                        <MenuItem icon={Bell} label="알림 설정" onClick={() => { }} />
+                        {isAdmin && (
+                            <MenuItem icon={Shield} label="관리자 페이지" onClick={() => onNavigate('admin')} />
+                        )}
+                        <MenuItem icon={HelpCircle} label="도움말" onClick={() => { }} />
+                        <MenuItem icon={FileText} label="이용약관" onClick={() => { }} />
+                    </div>
+                </div>
+
+                {/* Logout */}
+                <button className="w-full py-4 flex items-center justify-center gap-2 text-status-error font-medium hover:bg-status-error-bg rounded-xl transition-colors mb-8">
+                    <LogOut className="w-5 h-5" />
+                    로그아웃
+                </button>
+
+                {/* Company Info */}
+                <div className="text-xs text-text-disabled text-center space-y-1 pb-8">
+                    <p>(주)올타 | 대표: 정종환</p>
+                    <p>사업자등록번호: 680-64-00735</p>
+                    <p>문의: junopy@naver.com</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function MenuItem({ icon: Icon, label, onClick, highlight = false }: { icon: any, label: string, onClick: () => void, highlight?: boolean }) {
+    return (
+        <button
+            onClick={onClick}
+            className="w-full flex items-center justify-between p-4 hover:bg-app-tertiary transition-colors"
+        >
+            <div className="flex items-center gap-3">
+                <Icon className={`w-5 h-5 ${highlight ? 'text-status-error' : 'text-text-secondary'}`} />
+                <span className={`text-sm ${highlight ? 'text-status-error font-bold' : 'text-text-primary'}`}>{label}</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-text-disabled" />
+        </button>
+    );
+}

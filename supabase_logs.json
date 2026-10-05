@@ -1,0 +1,1363 @@
+[
+  {
+    "id": "40d17c17-d6b7-4fd7-b464-03ae4af3ea2c",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "강동고덕IC",
+    "var3": "8",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41630899630,
+        "date": 1780309538580,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41630899630,
+            "date": 1780309538580,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-06-01 19:25:38"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-06-01T10:25:40.185566+00:00"
+  },
+  {
+    "id": "b0c2e59d-d672-400f-97ef-3b001846b619",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "노브랜드",
+    "var3": "2",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41623264739,
+        "date": 1780282851068,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41623264739,
+            "date": 1780282851068,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-06-01 12:00:51"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-06-01T03:00:52.389503+00:00"
+  },
+  {
+    "id": "c95fcc43-b6e3-4ba1-a17a-be7d0cf7d7fa",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "경기 가평군 설악면 신천리 1-26",
+    "var3": "노브랜드",
+    "var4": "51",
+    "response_raw": {
+      "value": {
+        "uid": 41622260834,
+        "date": 1780280294265,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41622260834,
+            "date": 1780280294265,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-06-01 11:18:14"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-06-01T02:18:15.765487+00:00"
+  },
+  {
+    "id": "ef29ccf1-de57-434b-95bb-a9c833516a81",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "이케아 강동점",
+    "var3": "7",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41615410597,
+        "date": 1780235240654,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41615410598,
+            "date": 1780235240632,
+            "status": "OK"
+          },
+          {
+            "uid": 41615410597,
+            "date": 1780235240654,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-31 22:47:20"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-31T13:47:22.34966+00:00"
+  },
+  {
+    "id": "5ec78d19-c78b-41a7-8cc7-0aac89280767",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "이케아 강동점",
+    "var3": "7",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41615410598,
+        "date": 1780235240632,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41615410598,
+            "date": 1780235240632,
+            "status": "OK"
+          },
+          {
+            "uid": 41615410597,
+            "date": 1780235240654,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-31 22:47:20"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-31T13:47:22.023476+00:00"
+  },
+  {
+    "id": "e1a0bb5d-284e-4314-b24d-856932820d0a",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "강원특별자치도 춘천시 효자동 210-1",
+    "var3": "배재현대아파트",
+    "var4": "73",
+    "response_raw": {
+      "value": {
+        "uid": 41615198760,
+        "date": 1780231708433,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41615198759,
+            "date": 1780231708417,
+            "status": "OK"
+          },
+          {
+            "uid": 41615198760,
+            "date": 1780231708433,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-31 21:48:28"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-31T12:48:29.996577+00:00"
+  },
+  {
+    "id": "2fcb3ce0-22ac-4b14-bc6a-6879a8b91f49",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "강원특별자치도 춘천시 효자동 210-1",
+    "var3": "배재현대아파트",
+    "var4": "73",
+    "response_raw": {
+      "value": {
+        "uid": 41615198759,
+        "date": 1780231708417,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41615198759,
+            "date": 1780231708417,
+            "status": "OK"
+          },
+          {
+            "uid": 41615198760,
+            "date": 1780231708433,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-31 21:48:28"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-31T12:48:29.410414+00:00"
+  },
+  {
+    "id": "5185f7cf-8a5f-470a-a4c0-2a1aafbf4650",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "이케아 강동점",
+    "var3": "8",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41373419196,
+        "date": 1778666218448,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41373419195,
+            "date": 1778666218383,
+            "status": "OK"
+          },
+          {
+            "uid": 41373419196,
+            "date": 1778666218448,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-13 18:56:58"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-13T09:57:00.173066+00:00"
+  },
+  {
+    "id": "6239d852-8a4b-4b39-8619-c020e42403f8",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "이케아 강동점",
+    "var3": "8",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41373419195,
+        "date": 1778666218383,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41373419195,
+            "date": 1778666218383,
+            "status": "OK"
+          },
+          {
+            "uid": 41373419196,
+            "date": 1778666218448,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-13 18:56:58"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-13T09:56:59.814511+00:00"
+  },
+  {
+    "id": "95078326-09e4-4537-b59f-e379893bbcf6",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "경기 가평군 설악면 신천리 산 29-5",
+    "var3": "배재현대아파트",
+    "var4": "35",
+    "response_raw": {
+      "value": {
+        "uid": 41373135154,
+        "date": 1778664700522,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41373135155,
+            "date": 1778664700539,
+            "status": "OK"
+          },
+          {
+            "uid": 41373135154,
+            "date": 1778664700522,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-13 18:31:40"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-13T09:31:41.281875+00:00"
+  },
+  {
+    "id": "c68e7afa-c9df-4e1a-8a95-52b2654532f7",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "경기 가평군 설악면 신천리 산 29-5",
+    "var3": "배재현대아파트",
+    "var4": "35",
+    "response_raw": {
+      "value": {
+        "uid": 41373135155,
+        "date": 1778664700539,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41373135155,
+            "date": 1778664700539,
+            "status": "OK"
+          },
+          {
+            "uid": 41373135154,
+            "date": 1778664700522,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-13 18:31:40"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-13T09:31:41.045823+00:00"
+  },
+  {
+    "id": "6f5d2e45-ddb4-4c3f-84e8-18ed497f13ed",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "소울로스터리커피",
+    "var3": "1",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41320737452,
+        "date": 1778384087939,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 3,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41320737449,
+            "date": 1778384087891,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737451,
+            "date": 1778384087895,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737452,
+            "date": 1778384087939,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-10 12:34:48"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-10T03:34:49.867016+00:00"
+  },
+  {
+    "id": "7e681837-8c43-46d6-945b-0607b21bf068",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "소울로스터리커피",
+    "var3": "1",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41320737451,
+        "date": 1778384087895,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 3,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41320737449,
+            "date": 1778384087891,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737451,
+            "date": 1778384087895,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737452,
+            "date": 1778384087939,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-10 12:34:48"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-10T03:34:49.68801+00:00"
+  },
+  {
+    "id": "af7a7f2a-37ab-4b49-9652-8a503219b475",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "소울로스터리커피",
+    "var3": "1",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41320737449,
+        "date": 1778384087891,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 3,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41320737449,
+            "date": 1778384087891,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737451,
+            "date": 1778384087895,
+            "status": "OK"
+          },
+          {
+            "uid": 41320737452,
+            "date": 1778384087939,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-10 12:34:48"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-10T03:34:49.334917+00:00"
+  },
+  {
+    "id": "acdf280c-e5a7-4e88-93f7-c9ec6c6a62e6",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "암사IC",
+    "var3": "7",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41267897045,
+        "date": 1777978703200,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41267897044,
+            "date": 1777978703216,
+            "status": "OK"
+          },
+          {
+            "uid": 41267897045,
+            "date": 1777978703200,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-05 19:58:23"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-05T10:58:25.012845+00:00"
+  },
+  {
+    "id": "fc03db92-d69a-44d2-9434-f3f2a826e297",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "암사IC",
+    "var3": "7",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41267897044,
+        "date": 1777978703216,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41267897044,
+            "date": 1777978703216,
+            "status": "OK"
+          },
+          {
+            "uid": 41267897045,
+            "date": 1777978703200,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-05 19:58:23"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-05T10:58:24.596929+00:00"
+  },
+  {
+    "id": "1685814d-8003-48b9-9336-b67da4351cbe",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****1988",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "서울 강남구 청담동 89-13",
+    "var3": "배재현대아파트",
+    "var4": "20",
+    "response_raw": {
+      "value": {
+        "uid": 41267841921,
+        "date": 1777978012417,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41267841920,
+            "date": 1777978012426,
+            "status": "OK"
+          },
+          {
+            "uid": 41267841921,
+            "date": 1777978012417,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-05 19:46:52"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-05T10:46:53.66708+00:00"
+  },
+  {
+    "id": "81687969-69f4-44b5-b085-cc9782584534",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "서울 강남구 청담동 89-13",
+    "var3": "배재현대아파트",
+    "var4": "20",
+    "response_raw": {
+      "value": {
+        "uid": 41267841920,
+        "date": 1777978012426,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 2,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41267841920,
+            "date": 1777978012426,
+            "status": "OK"
+          },
+          {
+            "uid": 41267841921,
+            "date": 1777978012417,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-05 19:46:52"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-05T10:46:53.369417+00:00"
+  },
+  {
+    "id": "d6904ade-bb3a-4039-9387-36a6e6286a2c",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "명일여고앞교차로",
+    "var3": "6",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41247512174,
+        "date": 1777808945598,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41247512174,
+            "date": 1777808945598,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-03 20:49:05"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-03T11:49:06.390487+00:00"
+  },
+  {
+    "id": "67e6c589-47df-4076-9c0b-f063bca6ce9b",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "대한예수교장로회은평교회",
+    "var3": "배재현대아파트",
+    "var4": "9",
+    "response_raw": {
+      "value": {
+        "uid": 41247498221,
+        "date": 1777808705743,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41247498221,
+            "date": 1777808705743,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-03 20:45:05"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-03T11:45:07.198526+00:00"
+  },
+  {
+    "id": "103bff9f-bf77-4102-99bb-454bae58bb1a",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "개롱역교차로",
+    "var3": "6",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41238947254,
+        "date": 1777688354459,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41238947254,
+            "date": 1777688354459,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-02 11:19:14"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-02T02:19:15.776478+00:00"
+  },
+  {
+    "id": "9c02ffc9-b8eb-4aa8-8c57-acab4c43c84d",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "서울 강동구 둔촌동 572",
+    "var3": "노브랜드",
+    "var4": "14",
+    "response_raw": {
+      "value": {
+        "uid": 41238858526,
+        "date": 1777687725329,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41238858526,
+            "date": 1777687725329,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-05-02 11:08:45"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-05-02T02:08:45.887349+00:00"
+  },
+  {
+    "id": "43d543f6-a492-4101-82ec-e45d797fef79",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "서종IC",
+    "var3": "12",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41224887151,
+        "date": 1777537625866,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41224887151,
+            "date": 1777537625866,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-30 17:27:05"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-04-30T08:27:07.18716+00:00"
+  },
+  {
+    "id": "d8bb2468-b7b3-4983-94c4-ba9201f532f0",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "서울 강동구 고덕동 302-3",
+    "var3": "설악TG",
+    "var4": "29",
+    "response_raw": {
+      "value": {
+        "uid": 41224748749,
+        "date": 1777536710961,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41224748749,
+            "date": 1777536710961,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-30 17:11:51"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-04-30T08:11:52.093207+00:00"
+  },
+  {
+    "id": "af194a3b-ae20-48fa-a674-22a9b97b8335",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "레레케이크",
+    "var3": "4",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41221844258,
+        "date": 1777525268397,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41221844258,
+            "date": 1777525268397,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-30 14:01:08"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-04-30T05:01:08.964383+00:00"
+  },
+  {
+    "id": "85077d66-6190-4569-ba1e-70fb93cb73ec",
+    "user_id": null,
+    "type": "departure",
+    "channel": "alimtalk",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "서울 강동구 고덕동 390-35",
+    "var3": "배재현대아파트",
+    "var4": "7",
+    "response_raw": {
+      "value": {
+        "uid": 41221806160,
+        "date": 1777525221537,
+        "status": "OK"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41221806160,
+            "date": 1777525221537,
+            "status": "OK"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-30 14:00:21"
+      }
+    },
+    "status": "OK",
+    "error_message": null,
+    "created_at": "2026-04-30T05:00:22.370163+00:00"
+  },
+  {
+    "id": "207e3dbb-ddd9-4334-91f2-8d116b8b0ff0",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "sms",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "신천교차로",
+    "var3": "14",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41195996819,
+        "date": 1777359091358,
+        "status": "KKO_3016"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41195996819,
+            "date": 1777359091358,
+            "status": "KKO_3016"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-28 15:51:31"
+      }
+    },
+    "status": "KKO_3016",
+    "error_message": "카카오 오류: KKO_3016",
+    "created_at": "2026-04-28T06:51:32.954371+00:00"
+  },
+  {
+    "id": "874595e3-70a6-4fb4-86aa-18cb50f54b2c",
+    "user_id": null,
+    "type": "departure",
+    "channel": "sms",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "경기 가평군 청평면 청평리 638-7",
+    "var3": "경기 가평군 설악면 한서로 69-199",
+    "var4": "29",
+    "response_raw": {
+      "value": {
+        "uid": 41195770067,
+        "date": 1777357935891,
+        "status": "KKO_3016"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41195770067,
+            "date": 1777357935891,
+            "status": "KKO_3016"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-28 15:32:15"
+      }
+    },
+    "status": "KKO_3016",
+    "error_message": "카카오 오류: KKO_3016",
+    "created_at": "2026-04-28T06:32:16.674439+00:00"
+  },
+  {
+    "id": "b470ae11-1038-4d41-9b31-656815cf7c75",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "sms",
+    "recipient": "010****5540",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "배재현대아파트",
+    "var3": "1",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "uid": 41185854999,
+        "date": 1777291877994,
+        "status": "KKO_3016"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "uid": 41185854999,
+            "date": 1777291877994,
+            "status": "KKO_3016"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-27 21:11:18"
+      }
+    },
+    "status": "KKO_3016",
+    "error_message": "카카오 오류: KKO_3016",
+    "created_at": "2026-04-27T12:11:19.138581+00:00"
+  },
+  {
+    "id": "e7f4ea36-68b6-44cc-a23d-600c89dce793",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "거두사거리",
+    "var3": "8",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-26 22:06:29"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-26T13:06:31.00175+00:00"
+  },
+  {
+    "id": "bcf2c1d6-1b88-4da1-80e6-d79f37b31917",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "대명초교입구교차로",
+    "var3": "6",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-26 17:23:44"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-26T08:23:45.760281+00:00"
+  },
+  {
+    "id": "37cd5e17-142a-463c-9f92-9a3bcf72ef06",
+    "user_id": null,
+    "type": "waypoint",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11092",
+    "var1": "정종환",
+    "var2": "대명초교입구교차로",
+    "var3": "5",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-26 10:22:32"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-26T01:22:32.874361+00:00"
+  },
+  {
+    "id": "fe18eec1-acc5-433b-b529-4c3c510398c8",
+    "user_id": null,
+    "type": "departure",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "현대아파트",
+    "var3": "은평교회",
+    "var4": "7",
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-26 10:21:07"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-26T01:21:08.496958+00:00"
+  },
+  {
+    "id": "1ebd40d5-bc69-4984-9cc0-32d2a4e070d4",
+    "user_id": null,
+    "type": "arrival",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11093",
+    "var1": "정종환",
+    "var2": "마크노빌아파트",
+    "var3": "69",
+    "var4": null,
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-25 22:34:24"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-25T13:34:25.112358+00:00"
+  },
+  {
+    "id": "b05b2a0a-802f-4811-9b2a-98805b5c9010",
+    "user_id": null,
+    "type": "departure",
+    "channel": "ERR_280",
+    "recipient": "010****5540",
+    "template_code": "11091",
+    "var1": "정종환",
+    "var2": "경기 평택시 합정동 1-7",
+    "var3": "마크노빌아파트",
+    "var4": "70",
+    "response_raw": {
+      "value": {
+        "status": "ERR_280"
+      },
+      "full_response": {
+        "meta": "",
+        "count": 1,
+        "total": 0,
+        "value": [
+          {
+            "status": "ERR_280"
+          }
+        ],
+        "status": 200,
+        "message": "",
+        "datetime": "2026-04-25 20:48:34"
+      }
+    },
+    "status": "ERR_280",
+    "error_message": "카카오 오류: ERR_280",
+    "created_at": "2026-04-25T11:48:34.872034+00:00"
+  }
+]

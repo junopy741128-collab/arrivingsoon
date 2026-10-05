@@ -1,0 +1,720 @@
+import { useState, useEffect } from 'react';
+import { Home, Plus, History, Settings as SettingsIcon, User } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { HomePage } from './components/HomePage';
+import { NotificationSetup } from './components/NotificationSetup';
+// import { DrivingMode } from './pages/DrivingMode'; // Removed
+import { NavigationActive } from './components/NavigationActive';
+import { NotificationList } from './components/NotificationList';
+import { Settings } from './components/Settings';
+import { ContactManagement } from './components/ContactManagement';
+import { SnsLogin } from './components/SnsLogin';
+import { ProfileEdit } from './components/ProfileEdit';
+import { MyPage } from './components/MyPage';
+import { AdminPage } from './components/AdminPage';
+import { MessageManagement } from './components/MessageManagement';
+import { FavoriteTrips } from './components/FavoriteTrips';
+import { ThemeSelector } from './components/ThemeSelector';
+import { EmailLogin } from './components/EmailLogin';
+import { EmailSignup } from './components/EmailSignup';
+import { type Theme } from './utils/theme';
+import { createClient } from './utils/supabase/client';
+import { setAuthToken } from './utils/api';
+// import { AdBanner } from './components/AdBanner'; // Removed
+
+export type Contact = {
+  id: string;
+  name: string;
+  phone: string;
+  phoneNumber?: string; // Added for compatibility
+  isFavorite: boolean;
+  type: 'phone' | 'kakao';
+  group?: string; // Deprecated: use groups instead
+  groups: string[];
+};
+
+export type NavigationInfo = {
+  app: string;
+  departure: string;
+  destination: string;
+  distance: number;
+  estimatedTime: number;
+  startLat?: number;
+  startLng?: number;
+  destLat?: number; // Added
+  destLng?: number; // Added
+};
+
+export type SetupFormData = {
+  departure: string;
+  destination: string;
+  enableDeparture: boolean;
+  enableArrival: boolean;
+  recipient: string;
+  departureCondition: number;
+  departureMessage: string;
+  arrivalCondition: number;
+  arrivalMessage: string;
+  navigationInfo: NavigationInfo | null;
+  targetDistance?: number; // Added
+  selectedDestinationForNav: any | null; // PlacePrediction object
+};
+
+export type Notification = {
+  id: string;
+  type: 'departure' | 'arrival';
+  condition: {
+    type: 'time' | 'distance';
+    value: number;
+    unit: '분' | 'km';
+  };
+  message: string;
+  recipient: string;
+  status: 'pending' | 'sent' | 'failed';
+};
+
+export type Trip = {
+  id: string;
+  departure: string;
+  destination: string;
+  notifications: Notification[];
+  status: 'planning' | 'active' | 'completed' | 'cancelled';
+  estimatedTime: number;
+  estimatedDistance: number;
+  recipient?: string; // 수신자 이름 또는 연락처
+  createdAt?: string; // 생성 시간
+  startLat?: number; // 출발지 위도
+  startLng?: number; // 출발지 경도
+  destinationLat?: number; // 목적지 위도
+  destinationLng?: number; // 목적지 경도
+  startTime?: number; // 출발 시간 (Timestamp)
+
+  targetDistance?: number; // 자동 발송 트리거 거리 (km)
+  isFavorite?: boolean; // 즐겨찾기 여부
+  alias?: string; // 즐겨찾기 별칭 (예: 회사, 집)
+
+  // Advanced Trigger
+  triggerType?: 'time' | 'distance' | 'waypoint';
+  triggerValue?: number | string;
+  waypointLat?: number;
+  waypointLng?: number;
+  waypointName?: string; // 경유지 이름
+  recipientName?: string; // 수신자 이름
+  waypoints?: string; // JSON String for Multi-Waypoints
+  startPoint?: string; // For Waiting UI
+  initialStatus?: 'waiting' | 'active'; // 'waiting' or 'active'
+};
+
+export type UserProfile = {
+  name: string;
+  email: string;
+  phone: string;
+  points: number; // Added points
+};
+
+export type Screen = 'home' | 'setup' | 'active' | 'list' | 'settings' | 'contacts' | 'contactsManage' | 'favorites' | 'login' | 'profile' | 'messages' | 'theme' | 'emailLogin' | 'emailSignup' | 'mypage' | 'admin';
+
+import Overlay from './utils/overlay';
+import { BackgroundMode } from '@awesome-cordova-plugins/background-mode';
+
+const App: React.FC = () => {
+  const [currentScreen, setCurrentScreen] = useState<Screen>('home');
+  const [currentTheme, setCurrentTheme] = useState<Theme>('dark');
+  const [trips, setTrips] = useState<Trip[]>(() => {
+    const savedTrips = localStorage.getItem('trips');
+    return savedTrips ? JSON.parse(savedTrips) : [];
+  });
+  const [activeTrip, setActiveTrip] = useState<Trip | null>(() => {
+    // Restore active trip from trips list on boot
+    const savedTrips = localStorage.getItem('trips');
+    if (savedTrips) {
+      const parsed: Trip[] = JSON.parse(savedTrips);
+      return parsed.find(t => t.status === 'planning' || t.status === 'active') || null;
+    }
+    return null;
+  });
+
+  // Recent Completed Trips (for Home History)
+  const recentTrips = trips
+    .filter(t => t.status === 'completed' || t.status === 'cancelled')
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 5); // Limit to 5
+
+  const [selectedContacts, setSelectedContacts] = useState<Contact[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>(() => {
+    const savedContacts = localStorage.getItem('contacts');
+    if (savedContacts) {
+      return JSON.parse(savedContacts);
+    }
+    // Default contacts if none saved
+    return [
+      { id: '1', name: '김민준', phone: '010-1234-5678', phoneNumber: '01012345678', isFavorite: true, type: 'phone', groups: ['친구'] },
+      { id: '2', name: '이수진', phone: '010-2345-6789', phoneNumber: '01023456789', isFavorite: true, type: 'phone', groups: ['가족'] },
+      { id: '3', name: '박서연', phone: '010-3456-7890', phoneNumber: '01034567890', isFavorite: false, type: 'phone', groups: ['직장'] },
+      { id: '4', name: '최정훈', phone: '010-4567-8901', phoneNumber: '01045678901', isFavorite: false, type: 'phone', groups: ['친구'] },
+      { id: '5', name: '정예은', phone: '010-5678-9012', phoneNumber: '01056789012', isFavorite: false, type: 'phone', groups: ['기타'] },
+    ];
+  });
+  const [setupFormData, setSetupFormData] = useState<SetupFormData>({
+    departure: '',
+    destination: '',
+    enableDeparture: false,
+    enableArrival: true,
+    recipient: '',
+    departureCondition: 0,
+    departureMessage: '출발했습니다.',
+    arrivalCondition: 5,
+    arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+    navigationInfo: null,
+    selectedDestinationForNav: null,
+  });
+
+  // Update activeTrip if trips change (e.g. status update)
+  useEffect(() => {
+    const current = trips.find(t => t.status === 'planning' || t.status === 'active');
+    if (current && (!activeTrip || activeTrip.id !== current.id)) {
+      setActiveTrip(current);
+    } else if (!current && activeTrip) {
+      setActiveTrip(null);
+    }
+  }, [trips]);
+
+  // Save trips to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('trips', JSON.stringify(trips));
+  }, [trips]);
+
+  // Save contacts to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('contacts', JSON.stringify(contacts));
+  }, [contacts]);
+
+  // User Profile State
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    const saved = localStorage.getItem('userProfile');
+    return saved ? JSON.parse(saved) : {
+      name: '김운전',
+      email: 'junopy@naver.com',
+      phone: '010-1234-5678',
+      points: 5000 // Default points
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('userProfile', JSON.stringify(userProfile));
+  }, [userProfile]);
+
+
+  useEffect(() => {
+    localStorage.setItem('userProfile', JSON.stringify(userProfile));
+  }, [userProfile]);
+
+  // Point Deduction Logic
+  const deductPoints = (amount: number) => {
+    setUserProfile(prev => {
+      const newPoints = Math.max(0, (prev.points || 0) - amount);
+      return { ...prev, points: newPoints };
+    });
+  };
+
+  const handleCreateTrip = async (trip: Trip) => {
+    try {
+      // 1. Prepare Data for Native (Stringify complex objects)
+      const pluginData = {
+        ...trip,
+        // Ensure notifications is JSON String
+        notifications: JSON.stringify(trip.notifications),
+        // Ensure timeRemaining/distance are mapped correctly relative to what plugin expects
+        timeRemaining: trip.estimatedTime,
+        distance: trip.estimatedDistance,
+        // waypoints is already stringified in NotificationSetup, but ensure it's passed
+        waypoints: trip.waypoints,
+        // Fix: Map destinationLat -> destLat for plugin compatibility
+        destLat: trip.destinationLat,
+        destLng: trip.destinationLng,
+      };
+
+      // 2. Start Native Service
+      const { TripNotification } = await import('./plugins/TripNotificationPlugin');
+      // @ts-ignore
+      await TripNotification.startNotification({ tripData: pluginData });
+      console.log('Trip Native Service Started:', pluginData);
+
+      // 3. Update UI State
+      setTrips([...trips, trip]);
+      setActiveTrip(trip);
+      setCurrentScreen('active');
+      // 폼 초기화
+      setSetupFormData({
+        departure: '',
+        destination: '',
+        enableDeparture: false,
+        enableArrival: true,
+        recipient: '',
+        departureCondition: 0,
+        departureMessage: '출발했습니다.',
+        arrivalCondition: 5,
+        arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+        navigationInfo: null,
+        selectedDestinationForNav: null,
+      });
+    } catch (error) {
+      console.error('Failed to start trip service:', error);
+      alert('서비스 시작 실패: ' + JSON.stringify(error));
+    }
+  };
+
+  const handleUpdateTrip = (updatedTrip: Trip) => {
+    const newTrips = trips.map(t => t.id === updatedTrip.id ? updatedTrip : t);
+    setTrips(newTrips);
+    if (activeTrip?.id === updatedTrip.id) {
+      setActiveTrip(updatedTrip);
+    }
+  };
+
+  const handleCancelTrip = () => {
+    if (activeTrip) {
+      const updatedTrip = { ...activeTrip, status: 'cancelled' as const };
+      handleUpdateTrip(updatedTrip);
+
+      // Stop Background Service (Zombie Fix)
+      import('./plugins/TripNotificationPlugin').then(({ TripNotification }) => {
+        TripNotification.stopNotification().catch(err => console.error("Failed to stop service:", err));
+      });
+
+      setActiveTrip(null);
+      setCurrentScreen('home');
+
+      // 폼 초기화
+      setSetupFormData({
+        departure: '',
+        destination: '',
+        enableDeparture: false,
+        enableArrival: true,
+        recipient: '',
+        departureCondition: 0,
+        departureMessage: '출발했습니다.',
+        arrivalCondition: 5,
+        arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+        navigationInfo: null,
+        selectedDestinationForNav: null,
+      });
+    }
+  };
+
+  const handleSelectContacts = (contacts: Contact[]) => {
+    setSelectedContacts(contacts);
+  };
+
+  const handleToggleFavoriteTrip = (tripId: string) => {
+    setTrips(trips.map(t => t.id === tripId ? { ...t, isFavorite: !t.isFavorite } : t));
+  };
+
+  const handleDeleteTrip = (tripId: string) => {
+    setTrips(trips.filter(t => t.id !== tripId));
+  };
+
+  const handleRebookTrip = (trip: Trip) => {
+    // Clone logic: New ID, Created At, Status=planning
+    const { id, startTime, startLat, startLng, notifications, ...rest } = trip;
+
+    // Reset notifications to pending
+    const resetNotifications = notifications.map(n => ({
+      ...n,
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      status: 'pending' as const
+    }));
+
+    const newTrip: Trip = {
+      ...rest,
+      id: Date.now().toString(),
+      status: 'planning',
+      createdAt: new Date().toISOString(),
+      notifications: resetNotifications,
+      // Retain nav info but reset tracking data
+      startLat: trip.startLat,
+      startLng: trip.startLng,
+    };
+
+    // Add new trip
+    setTrips((prev) => [...prev, newTrip]);
+    // Navigate to List (Pending Tab)
+    setCurrentScreen('list');
+  };
+
+  const handleResetAndNavigateSetup = () => {
+    setSetupFormData({
+      departure: '',
+      destination: '',
+      recipient: '',
+      departureCondition: 0,
+      departureMessage: '출발했습니다.',
+      arrivalCondition: 5,
+      arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+      navigationInfo: null,
+      selectedDestinationForNav: null,
+      enableArrival: true,
+      enableDeparture: false,
+    });
+    setSelectedContacts([]);
+    setCurrentScreen('setup');
+  };
+
+  // Check for OAuth session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session?.access_token) {
+        setAuthToken(session.access_token);
+        console.log('OAuth 로그인 성공 - 초기 세션 확인');
+        // If we are on home/login screen, move to setup
+        if (currentScreen === 'home' || currentScreen === 'login') {
+          setCurrentScreen('setup');
+        }
+      }
+    };
+
+    checkSession();
+
+    // Request Battery Optimization Ignore (Android)
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+      import('./plugins/TripNotificationPlugin').then(async ({ TripNotification }) => {
+        try {
+          console.log("Requesting Battery Optimization Ignore...");
+          await TripNotification.requestIgnoreBatteryOptimizations();
+        } catch (e) {
+          console.error("Failed to request battery optimization ignore", e);
+        }
+      });
+    }
+
+    // Initialize StatusBar
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.show().catch(() => console.log('StatusBar show failed'));
+      StatusBar.setStyle({ style: Style.Dark }).catch(() => console.log('StatusBar setStyle failed'));
+      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => console.log('StatusBar overlay failed'));
+    }
+  }, []);
+
+  // Handle Android hardware back button
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const backButtonListener = CapApp.addListener('backButton', () => {
+      // Define navigation hierarchy
+      const navigationStack: Record<Screen, Screen | null> = {
+        'home': null, // Exit app on home screen
+        'setup': 'home',
+        'active': 'home',
+        'list': 'home',
+        'settings': 'home',
+        'contacts': 'setup', // Go back to setup when in contact selection
+        'contactsManage': 'settings', // Go back to settings when in contact management
+        'favorites': 'settings', // Go back to settings
+        'login': 'home',
+        'profile': 'settings',
+        'messages': 'settings',
+        'theme': 'settings',
+        'emailLogin': 'login',
+        'emailSignup': 'login',
+        'mypage': 'home',
+        'admin': 'settings',
+      };
+
+      const previousScreen = navigationStack[currentScreen];
+
+      if (previousScreen === null) {
+        // On home screen, exit app
+        CapApp.exitApp();
+      } else if (previousScreen) {
+        // Navigate to previous screen
+        setCurrentScreen(previousScreen);
+      }
+    });
+
+    return () => {
+      backButtonListener.then(handle => handle.remove());
+    };
+  }, [currentScreen]);
+
+  // Listen for auth changes
+  useEffect(() => {
+    const supabase = createClient();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        setAuthToken(session.access_token);
+        if (currentScreen === 'login' || currentScreen === 'emailLogin' || currentScreen === 'emailSignup') {
+          setCurrentScreen('setup'); // Redirect to Setup instead of Home
+          console.log('Auth state changed, navigating to setup');
+        }
+      }
+    });
+
+    // Handle Deep Links for OAuth
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('appUrlOpen', async ({ url }) => {
+        console.log('App URL Open:', url);
+        if (url.includes('login-callback')) { // Match your redirect host
+          try {
+            // Parse tokens from URL hash or query
+            // URL might be: com.example.ans://login-callback#access_token=...&items...
+            // URLSearchParams works with query strings, we might need to fix the format if it's a hash.
+            // Commonly OAuth returns fragment: #access_token=...
+            const hashIndex = url.indexOf('#');
+            if (hashIndex !== -1) {
+              const params = new URLSearchParams(url.substring(hashIndex + 1));
+              const access_token = params.get('access_token');
+              const refresh_token = params.get('refresh_token');
+
+              if (access_token && refresh_token) {
+                const { error } = await supabase.auth.setSession({
+                  access_token,
+                  refresh_token
+                });
+                if (error) throw error;
+                console.log('Session set successfully from deep link');
+              }
+            }
+          } catch (error) {
+            console.error('Error handling deep link:', error);
+            alert('로그인 처리 중 오류가 발생했습니다.');
+          }
+        }
+      });
+    }
+
+    return () => {
+      subscription.unsubscribe();
+      CapApp.removeAllListeners();
+    };
+  }, [currentScreen]);
+
+  const renderScreen = () => {
+    switch (currentScreen) {
+      case 'home':
+        return (
+          <HomePage
+            onNavigate={(screen) => {
+              if (screen === 'setup') handleResetAndNavigateSetup();
+              else setCurrentScreen(screen);
+            }}
+            onSelectTrip={setActiveTrip}
+            activeTrips={trips.filter(t => t.status === 'active' || t.status === 'planning')}
+            userProfile={userProfile}
+            recentTrips={recentTrips}
+          />
+        );
+      case 'setup':
+        return (
+          <NotificationSetup
+            onBack={() => setCurrentScreen('home')}
+            onComplete={handleCreateTrip}
+            onNavigate={setCurrentScreen}
+            selectedContacts={selectedContacts}
+            setSelectedContacts={setSelectedContacts}
+            setupFormData={setupFormData}
+            setSetupFormData={setSetupFormData}
+          />
+        );
+      case 'active':
+        return activeTrip ? (
+          <NavigationActive
+            trip={activeTrip}
+            onUpdate={handleUpdateTrip}
+            onCancel={handleCancelTrip}
+            onNavigate={setCurrentScreen}
+            userPoints={userProfile.points || 0}
+            deductPoints={deductPoints}
+          />
+        ) : (
+          <HomePage onNavigate={setCurrentScreen} />
+        );
+      case 'list':
+        return (
+          <NotificationList
+            trips={trips}
+            onNavigate={setCurrentScreen}
+            onSelectTrip={setActiveTrip}
+            onCancelTrip={(tripId) => {
+              const trip = trips.find(t => t.id === tripId);
+              if (trip) {
+                if (trip.status === 'planning') {
+                  handleUpdateTrip({ ...trip, status: 'cancelled' });
+                } else {
+                  handleDeleteTrip(tripId);
+                }
+              }
+            }}
+            onToggleFavorite={handleToggleFavoriteTrip}
+          />
+        );
+      case 'settings':
+        // Note: The user manually changed profile nav to 'profile-edit', but App handles it as 'profile'.
+        // We will add a fallback case for 'profile-edit' just in case below.
+        return <Settings onNavigate={setCurrentScreen} currentTheme={currentTheme} />;
+      case 'contacts':
+        return (
+          <ContactManagement
+            onNavigate={setCurrentScreen}
+            onSelectContacts={handleSelectContacts}
+            selectionMode={true}
+            contacts={contacts}
+            setContacts={setContacts}
+            mode="select"
+            onContactSelect={(contact) => {
+              // Handle single contact selection
+              handleSelectContacts([contact]);
+            }}
+            fromScreen="setup"
+            initialSelectedContacts={selectedContacts}
+          />
+        );
+      case 'favorites':
+        return (
+          <FavoriteTrips
+            trips={trips}
+            onNavigate={setCurrentScreen}
+            onRebook={handleRebookTrip}
+            onToggleFavorite={handleToggleFavoriteTrip}
+            onUpdateTrip={handleUpdateTrip}
+          />
+        );
+      case 'contactsManage':
+        return (
+          <ContactManagement
+            onNavigate={setCurrentScreen}
+            selectionMode={false}
+            contacts={contacts}
+            setContacts={setContacts}
+          />
+        );
+      case 'login':
+        return (
+          <SnsLogin
+            onBack={() => setCurrentScreen('home')}
+            onComplete={() => setCurrentScreen('setup')}
+            onNavigate={setCurrentScreen}
+          />
+        );
+
+      // Fallback for user modification to 'profile-edit'
+      case 'profile':
+      // @ts-ignore
+      case 'profile-edit':
+        return (
+          <ProfileEdit
+            onNavigate={setCurrentScreen}
+            userProfile={userProfile}
+            onUpdateProfile={setUserProfile}
+          />
+        );
+      case 'messages':
+        return (
+          <MessageManagement
+            onNavigate={setCurrentScreen}
+          />
+        );
+      case 'theme':
+        return (
+          <ThemeSelector
+            onNavigate={setCurrentScreen}
+            currentTheme={currentTheme}
+            onThemeChange={setCurrentTheme}
+          />
+        );
+      case 'emailLogin':
+        return (
+          <EmailLogin
+            onNavigate={setCurrentScreen}
+            currentTheme={currentTheme}
+          />
+        );
+      case 'emailSignup':
+        return (
+          <EmailSignup
+            onNavigate={setCurrentScreen}
+            currentTheme={currentTheme}
+          />
+        );
+      case 'mypage':
+        return <MyPage onNavigate={setCurrentScreen} userProfile={userProfile} />;
+      case 'admin':
+        return <AdminPage onNavigate={setCurrentScreen} />;
+      default:
+        return <HomePage onNavigate={setCurrentScreen} />;
+    }
+  };
+
+  const isNavVisible = ['home', 'setup', 'list', 'settings', 'active', 'mypage'].includes(currentScreen);
+
+  return (
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0f2920' }}>
+      {/* Top Safe Area Spacer */}
+      <div style={{ height: 'env(safe-area-inset-top)', width: '100%', flexShrink: 0, backgroundColor: '#0f2920' }} />
+
+      {/* Main Content Area */}
+      <div
+        style={{
+          flex: 1,
+          width: '100%',
+          minHeight: 0,
+          position: 'relative',
+          // Only apply padding for screens with bottom navigation, exclude home screen for proper centering
+          paddingBottom: isNavVisible && currentScreen !== 'home' ? '5rem' : '0'
+        }}
+      >
+        <div style={{
+          width: '100%',
+          height: '100%'
+        }}>
+          {renderScreen()}
+        </div>
+      </div>
+
+      {/* Persistent Bottom Navigation */}
+      {isNavVisible && (
+        <nav
+          className="fixed bottom-0 left-0 right-0 z-[200] bg-app-secondary border-t border-border"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          <div className="flex items-center justify-around h-20 max-w-lg mx-auto">
+            <button
+              onClick={() => setCurrentScreen('home')}
+              className="flex flex-col items-center justify-center flex-1 space-y-1 active:scale-95 active:opacity-70 transition-all"
+            >
+              <Home className={`w-6 h-6 ${currentScreen === 'home' ? 'text-app-accent' : 'text-text-disabled'}`} />
+              <span className={`text-xs ${currentScreen === 'home' ? 'text-app-accent' : 'text-text-disabled'}`}>홈</span>
+            </button>
+            <button
+              onClick={() => setCurrentScreen('setup')}
+              className="flex flex-col items-center justify-center flex-1 space-y-1 active:scale-95 active:opacity-70 transition-all"
+            >
+              <Plus className={`w-6 h-6 ${currentScreen === 'setup' ? 'text-app-accent' : 'text-text-disabled'}`} />
+              <span className={`text-xs ${currentScreen === 'setup' ? 'text-app-accent' : 'text-text-disabled'}`}>예약하기</span>
+            </button>
+            <button
+              onClick={() => setCurrentScreen('list')}
+              className="flex flex-col items-center justify-center flex-1 space-y-1 active:scale-95 active:opacity-70 transition-all"
+            >
+              <History className={`w-6 h-6 ${currentScreen === 'list' ? 'text-app-accent' : 'text-text-disabled'}`} />
+              <span className={`text-xs ${currentScreen === 'list' ? 'text-app-accent' : 'text-text-disabled'}`}>내역보기</span>
+            </button>
+            <button
+              onClick={() => setCurrentScreen('mypage')}
+              className="flex flex-col items-center justify-center flex-1 space-y-1 active:scale-95 active:opacity-70 transition-all"
+            >
+              <User className={`w-6 h-6 ${currentScreen === 'mypage' ? 'text-app-accent' : 'text-text-disabled'}`} />
+              <span className={`text-xs ${currentScreen === 'mypage' ? 'text-app-accent' : 'text-text-disabled'}`}>마이페이지</span>
+            </button>
+          </div>
+        </nav>
+      )}
+    </div>
+  );
+};
+
+export default App;

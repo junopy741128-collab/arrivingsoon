@@ -1,0 +1,998 @@
+import { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, MapPin, User, Home, Plus, History, Settings as SettingsIcon, Minus, Edit2, Trash2, Navigation, Clock, Route, AlertCircle, Loader2, Train, Bus, Check, ChevronRight } from 'lucide-react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import type { Trip, Screen, Contact, SetupFormData, NavigationInfo, Notification } from '../App';
+import { getCurrentPosition } from '../utils/capacitor-plugins';
+import { getInstalledNavigationApps, launchNavigationApp, savePreferredNavigationApp, getPreferredNavigationApp, type NavigationAppInfo } from '../utils/navigation';
+import { calculateDistance, estimateTravelTime, formatDistance } from '../utils/distance';
+import { searchPoiTmap, getRouteInfo, reverseGeocodeTmap, type TmapPoiResult } from '../utils/tmap';
+import { Capacitor } from '@capacitor/core';
+import { DestinationSearch, type TmapSearchResult } from './DestinationSearch';
+import Overlay from '../utils/overlay';
+import { TemplateTagButtons } from './TemplateTagButtons';
+import { MessagePreview } from './MessagePreview';
+
+interface NotificationSetupProps {
+  onBack: () => void;
+
+  onComplete: (trip: Trip) => void;
+  onNavigate: (screen: Screen) => void;
+  selectedContacts: Contact[];
+  setupFormData: SetupFormData;
+  setSetupFormData: (data: SetupFormData) => void;
+}
+
+interface SavedMessage {
+  id: string;
+  text: string;
+}
+
+interface PlacePrediction {
+  description: string;
+  place_id: string;
+  structured_formatting?: {
+    main_text: string;
+    secondary_text: string;
+  };
+  types?: string[];
+  // Add coordinates for Tmap integration
+  lat?: number;
+  lng?: number;
+  category?: string;
+  distance?: number;
+}
+
+export function NotificationSetup({ onBack, onComplete, onNavigate, selectedContacts, setupFormData, setSetupFormData }: NotificationSetupProps) {
+  // 출발지 기본값을 '현재 위치'로 설정
+  const [departure, setDeparture] = useState(setupFormData.departure || '현재 위치');
+  const [destination, setDestination] = useState(setupFormData.destination);
+
+  // [NEW] Search State
+  const [isSearching, setIsSearching] = useState(false);
+
+  // 알림 설정 상태 (다중 선택 가능)
+  const [enableDeparture, setEnableDeparture] = useState(setupFormData.enableDeparture);
+  const [enableArrival, setEnableArrival] = useState(setupFormData.enableArrival);
+
+  const [recipient, setRecipient] = useState(setupFormData.recipient);
+
+  // 출발 알림 설정
+  const [departureCondition, setDepartureCondition] = useState(setupFormData.departureCondition);
+  const [departureMessage, setDepartureMessage] = useState(setupFormData.departureMessage);
+
+  // 도착 알림 설정
+  const [arrivalCondition, setArrivalCondition] = useState(setupFormData.arrivalCondition);
+  const [arrivalMessage, setArrivalMessage] = useState(setupFormData.arrivalMessage);
+
+  const [navigationInfo, setNavigationInfo] = useState<NavigationInfo | null>(setupFormData.navigationInfo);
+  // const [isConnecting, setIsConnecting] = useState(false); // Unused
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'success' | 'failed'>('idle');
+
+  // 도착지 입력 다이얼로그 상태 제거 (DestinationSearch로 대체)
+  // const [isDestinationDialogOpen, setIsDestinationDialogOpen] = useState(false);
+  // const [destinationInput, setDestinationInput] = useState('');
+  // const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
+  // const [isLoadingPredictions, setIsLoadingPredictions] = useState(false);
+  // const [searchError, setSearchError] = useState<string | null>(null);
+
+  // 네비게이션 앱 선택 다이얼로그
+  const [isNavAppDialogOpen, setIsNavAppDialogOpen] = useState(false);
+  const [installedNavApps, setInstalledNavApps] = useState<NavigationAppInfo[]>([]);
+  const [selectedDestinationForNav, setSelectedDestinationForNav] = useState<PlacePrediction | null>(setupFormData.selectedDestinationForNav || null);
+
+  // 추가 다이얼로그 상태
+  const [isTimeDialogOpen, setIsTimeDialogOpen] = useState(false);
+  const [isDaysDialogOpen, setIsDaysDialogOpen] = useState(false);
+  const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
+
+  // 상태 변경 시 상위 컴포넌트에 저장
+  useEffect(() => {
+    setSetupFormData({
+      departure,
+      destination,
+      enableDeparture,
+      enableArrival,
+      recipient,
+      departureCondition,
+      departureMessage,
+      arrivalCondition,
+      arrivalMessage,
+      navigationInfo: null,
+      selectedDestinationForNav,
+    });
+  }, [departure, destination, enableDeparture, enableArrival, recipient, departureCondition, departureMessage, arrivalCondition, arrivalMessage, navigationInfo, selectedDestinationForNav, setSetupFormData]);
+
+  // 선택된 연락처를 받는 사람 필드에 표시
+  useEffect(() => {
+    if (selectedContacts.length > 0) {
+      // 이름과 전화번호를 함께 표시: "이름 (전화번호)" 형식
+      const contactText = selectedContacts
+        .map(c => {
+          const phone = c.phoneNumber || c.phone;
+          return c.name ? `${c.name} (${phone})` : phone;
+        })
+        .filter(text => text) // 빈 값 제거
+        .join(', ');
+      setRecipient(contactText);
+    }
+  }, [selectedContacts]);
+
+  // Load installed navigation apps when dialog opens
+  useEffect(() => {
+    const loadInstalledApps = async () => {
+      if (isNavAppDialogOpen) {
+        try {
+          // Define default apps in case the native plugin isn't available
+          const defaultApps: NavigationAppInfo[] = [
+            { id: 'tmap', name: 'Tmap', isInstalled: true },
+            { id: 'kakao', name: '카카오내비', isInstalled: true },
+            { id: 'naver', name: '네이버지도', isInstalled: true },
+          ];
+
+          // Try to get installed apps from native plugin
+          if (Capacitor.getPlatform() !== 'web') {
+            // TODO: Implement getInstalledNavigationApps properly
+            // For now, use default apps
+            setInstalledNavApps(defaultApps);
+          } else {
+            // In browser, use default apps for testing
+            setInstalledNavApps(defaultApps);
+          }
+        } catch (error) {
+          console.error('Failed to load navigation apps:', error);
+          // Fallback to default apps
+          setInstalledNavApps([
+            { id: 'tmap', name: 'Tmap', isInstalled: true },
+            { id: 'kakao', name: '카카오내비', isInstalled: true },
+            { id: 'naver', name: '네이버지도', isInstalled: true },
+          ]);
+        }
+      }
+    };
+
+    loadInstalledApps();
+  }, [isNavAppDialogOpen]);
+
+  // 알림 조건 값이 변경될 때 메시지 자동 업데이트 (옵션)
+  // 사용자가 직접 수정할 수도 있으므로, 조건 변경 시 메시지를 강제로 덮어쓰는 것은 주의해야 함.
+  // 여기서는 초기값 설정이나 템플릿 제안 정도로 활용하는 것이 좋음.
+
+  // 자주 쓰는 메시지 관리 - 새로운 변수 시스템
+  const [savedMessages, setSavedMessages] = useState<SavedMessage[]>([
+    { id: '1', text: '{시간}분 후 도착 예정입니다.' },
+    { id: '2', text: '{시간}분 내 도착합니다.' },
+    { id: '3', text: '{기사명} 기사입니다. {시간}분 후 도착 예정입니다.' },
+    { id: '4', text: '약속하신 장소({도착지})에 {시간}분 후 도착합니다. 잠시만 기다려주세요.' },
+    { id: '5', text: '출발지: {출발지}\n도착지: {도착지}\n{시간}분 내 도착이 예상됩니다.' },
+  ]);
+  const [isMessageDialogOpen, setIsMessageDialogOpen] = useState(false);
+  const [isAddMessageDialogOpen, setIsAddMessageDialogOpen] = useState(false);
+  const [isEditMessageDialogOpen, setIsEditMessageDialogOpen] = useState(false);
+  const [newMessageText, setNewMessageText] = useState('');
+  const [editingMessage, setEditingMessage] = useState<SavedMessage | null>(null);
+
+  // Refs for tag insertion
+  const newMessageInputRef = useRef<HTMLTextAreaElement>(null);
+  const editMessageInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // 메시지 타겟 (출발 메시지인지 도착 메시지인지 구분)
+  const [messageTarget, setMessageTarget] = useState<'departure' | 'arrival'>('arrival');
+
+  const handleAddMessage = () => {
+    if (!newMessageText.trim()) {
+      alert('메시지를 입력해주세요.');
+      return;
+    }
+
+    const newMessage: SavedMessage = {
+      id: Date.now().toString(),
+      text: newMessageText,
+    };
+
+    setSavedMessages([...savedMessages, newMessage]);
+    setNewMessageText('');
+    setIsAddMessageDialogOpen(false);
+  };
+
+  const handleEditMessage = () => {
+    if (!editingMessage || !editingMessage.text.trim()) {
+      alert('메시지를 입력해주세요.');
+      return;
+    }
+
+    setSavedMessages(savedMessages.map(m =>
+      m.id === editingMessage.id ? editingMessage : m
+    ));
+    setEditingMessage(null);
+    setIsEditMessageDialogOpen(false);
+  };
+
+  const handleDeleteMessage = (id: string) => {
+    if (confirm('이 메시지를 삭제하시겠습니까?')) {
+      setSavedMessages(savedMessages.filter(m => m.id !== id));
+    }
+  };
+
+  // Tag insertion handlers
+  const handleInsertTagInNewMessage = (tag: string) => {
+    const input = newMessageInputRef.current;
+    if (!input) return;
+
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const text = newMessageText;
+
+    const newText = text.substring(0, start) + tag + text.substring(end);
+    setNewMessageText(newText);
+
+    // Set cursor after inserted tag
+    setTimeout(() => {
+      input.selectionStart = input.selectionEnd = start + tag.length;
+      input.focus();
+    }, 0);
+  };
+
+  const handleInsertTagInEditMessage = (tag: string) => {
+    const input = editMessageInputRef.current;
+    if (!input || !editingMessage) return;
+
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const text = editingMessage.text;
+
+    const newText = text.substring(0, start) + tag + text.substring(end);
+    setEditingMessage({ ...editingMessage, text: newText });
+
+    // Set cursor after inserted tag
+    setTimeout(() => {
+      input.selectionStart = input.selectionEnd = start + tag.length;
+      input.focus();
+    }, 0);
+  };
+
+  const handleSelectMessage = (text: string) => {
+    if (messageTarget === 'departure') {
+      setDepartureMessage(text);
+    } else {
+      setArrivalMessage(text);
+    }
+    setIsMessageDialogOpen(false);
+  };
+
+  const openMessageDialog = (target: 'departure' | 'arrival') => {
+    setMessageTarget(target);
+    setIsMessageDialogOpen(true);
+  };
+
+  const openEditMessageDialog = (msg: SavedMessage) => {
+    setEditingMessage({ ...msg });
+    setIsEditMessageDialogOpen(true);
+  };
+
+
+
+
+  // handleConnectNavigation removed as it is no longer used.
+
+  // [NEW] Handle selection from DestinationSearch
+  const handleDestinationSelect = (result: TmapSearchResult) => {
+    const prediction: PlacePrediction = {
+      description: result.address,
+      place_id: `tmap-${result.lat}-${result.lng}`,
+      structured_formatting: {
+        main_text: result.name,
+        secondary_text: result.address
+      },
+      lat: result.lat,
+      lng: result.lng,
+      category: result.category,
+      distance: result.distance
+    };
+
+    addToRecentSearches(prediction);
+    setSelectedDestinationForNav(prediction);
+    setDestination(result.name); // Simple name as destination text
+    setIsSearching(false);
+
+    // Update local storage or saved places if needed handled by addToRecentSearches
+  };
+
+  // 자주 가는 곳 & 최근 검색 상태
+  const [recentSearches, setRecentSearches] = useState<PlacePrediction[]>(() => {
+    const saved = localStorage.getItem('recentSearches');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [savedPlaces, setSavedPlaces] = useState<{ home: PlacePrediction | null; work: PlacePrediction | null }>(() => {
+    const saved = localStorage.getItem('savedPlaces');
+    return saved ? JSON.parse(saved) : { home: null, work: null };
+  });
+
+  // 최근 검색 저장
+  const addToRecentSearches = (place: PlacePrediction) => {
+    const newRecents = [place, ...recentSearches.filter(p => p.place_id !== place.place_id)].slice(0, 10);
+    setRecentSearches(newRecents);
+    localStorage.setItem('recentSearches', JSON.stringify(newRecents));
+  };
+
+  // 자주 가는 곳 저장
+  const handleSavePlace = (type: 'home' | 'work', place: PlacePrediction) => {
+    const newSaved = { ...savedPlaces, [type]: place };
+    setSavedPlaces(newSaved);
+    localStorage.setItem('savedPlaces', JSON.stringify(newSaved));
+    // No dialog to close
+  };
+
+  const [registeringType, setRegisteringType] = useState<'home' | 'work' | null>(null);
+
+  // 주소 포맷팅 함수 (대한민국 제거)
+  const formatAddress = (address: string) => {
+    return address.replace('대한민국 ', '').trim();
+  };
+
+  // 도착지 선택 후 네비게이션 앱 선택 다이얼로그 표시 (수정: 저장만 하고 네비 연동은 나중에)
+  // This function is still used by logic but we've replaced user interaction ref mostly.
+  // We keep it for "Saved Places" logic if needed, but primary select is now handleDestinationSelect
+  const handleSelectDestination = async (prediction: PlacePrediction) => {
+    // 등록 모드인 경우
+    if (registeringType) {
+      handleSavePlace(registeringType, prediction);
+      setRegisteringType(null);
+      // setDestinationInput(''); // Removed
+      // setPlacePredictions([]); // Removed
+      alert(`${registeringType === 'home' ? '집' : '회사/학교'}이(가) 등록되었습니다.`);
+      return;
+    }
+
+    // 일반 선택인 경우
+    console.log('🎯 도착지 선택:', prediction);
+    addToRecentSearches(prediction);
+    setSelectedDestinationForNav(prediction);
+    setDestination(prediction.structured_formatting?.main_text || prediction.description); // Update UI text
+    // setIsDestinationDialogOpen(false); // Removed
+
+    // setupFormData에 저장
+    setSetupFormData({
+      ...setupFormData,
+      selectedDestinationForNav: prediction,
+      destination: prediction.structured_formatting?.main_text || prediction.description,
+    });
+    console.log('✅ selectedDestinationForNav 설정 완료 및 setupFormData에 저장');
+
+    // Auto-launch logic removed. Now just sets the state.
+  };
+
+  // ✅ 네비게이션 연동 없이 바로 GPS 추적 시작
+  const prepareNavigationInfo = async (prediction: PlacePrediction): Promise<NavigationInfo | null> => {
+    setConnectionStatus('connecting');
+
+    try {
+      // 1. 현재 위치 가져오기
+      const position = await getCurrentPosition();
+
+      if (!position) {
+        throw new Error('위치 정보를 가져올 수 없습니다.');
+      }
+
+      const currentLat = position.latitude;
+      const currentLng = position.longitude;
+
+      // 2. 현재 위치 주소 가져오기 (Reverse Geocoding - Tmap)
+      const departureAddress = await reverseGeocodeTmap(currentLat, currentLng) || '현재 위치';
+
+      // 3. 도착지 좌표 가져오기
+      let destLat = prediction.lat;
+      let destLng = prediction.lng;
+
+      // 좌표가 없으면(예전 데이터 등) 다시 검색
+      if (!destLat || !destLng) {
+        console.log('도착지 좌표 없음, 재검색 시도:', prediction.description);
+        const results = await searchPoiTmap(prediction.description);
+        if (results && results.length > 0) {
+          destLat = results[0].lat;
+          destLng = results[0].lng;
+        } else {
+          throw new Error('도착지 좌표를 가져올 수 없습니다.');
+        }
+      }
+
+      // 4. Tmap API로 거리/시간 계산 (1회만)
+      const routeInfo = await getRouteInfo(currentLat, currentLng, destLat, destLng);
+
+      if (!routeInfo) {
+        throw new Error('경로 정보가 비어있습니다.');
+      }
+
+      // 5. 네비게이션 정보 생성 (앱 실행 없이)
+      const placeName = prediction.structured_formatting?.main_text || prediction.description;
+      const formattedPlaceName = formatAddress(placeName);
+
+      const navInfo: NavigationInfo = {
+        app: 'GPS 추적', // 네비게이션 앱 대신 GPS 추적
+        departure: departureAddress,
+        destination: formattedPlaceName,
+        distance: routeInfo.totalDistance / 1000, // meters -> km
+        estimatedTime: Math.round(routeInfo.totalTime / 60), // seconds -> minutes
+        startLat: currentLat, // ✅ 출발지 위도
+        startLng: currentLng, // ✅ 출발지 경도
+      };
+
+      setNavigationInfo(navInfo);
+      setDeparture(departureAddress);
+      setDestination(formattedPlaceName);
+      setConnectionStatus('success');
+
+      console.log('✅ GPS 추적 준비 완료:', navInfo);
+      return navInfo;
+    } catch (error: any) {
+      console.error('GPS 추적 준비 오류:', error);
+      setConnectionStatus('failed');
+
+      if (error.code === 1) {
+        alert('GPS 위치 권한을 허용해주세요.');
+      } else if (error.message) {
+        alert(`준비 실패: ${error.message}`);
+      } else {
+        alert('준비에 실패했습니다. 다시 시도해주세요.');
+      }
+      return null;
+    }
+  };
+
+  // 네비게이션 앱 선택 핸들러 (수정: 선택 후 바로 예약 완료로 이어짐)
+  const handleSelectNavApp = async (appId: string, rememberChoice: boolean) => {
+    // 1. Check Overlay Permission (Android only)
+    if (Capacitor.getPlatform() === 'android') {
+      try {
+        const { granted } = await Overlay.checkPermission();
+        if (!granted) {
+          await Overlay.requestPermission();
+          alert('원활한 안내를 위해 [다른 앱 위에 표시] 권한을 허용해주세요.\n권한 허용 후 다시 시도해주세요.');
+          return;
+        }
+      } catch (error) {
+        console.error('Overlay permission error:', error);
+      }
+    }
+
+    if (rememberChoice) {
+      savePreferredNavigationApp(appId as any);
+    }
+
+    setIsNavAppDialogOpen(false);
+
+    if (selectedDestinationForNav) {
+      // 2. Show Overlay before launching navigation
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          await Overlay.show();
+        } catch (error) {
+          console.error('Failed to show overlay:', error);
+        }
+      }
+
+      const navInfo = await launchNavigationWithApp(appId, selectedDestinationForNav);
+      if (navInfo) {
+        completeReservation(navInfo);
+      }
+    }
+  };
+
+  // ✅ 예약시작 버튼 클릭 - 바로 GPS 추적 시작
+  const handleStartAndNavigate = async () => {
+    console.log('🚀 예약시작 버튼 클릭, selectedDestinationForNav:', selectedDestinationForNav);
+    if (!selectedDestinationForNav) {
+      console.error('❌ selectedDestinationForNav가 없습니다!');
+      alert('도착지를 검색하여 선택해 주세요.');
+      return;
+    }
+
+    if (!recipient) {
+      alert('받는 사람을 입력해주세요.');
+      return;
+    }
+
+    if (!enableDeparture && !enableArrival) {
+      alert('최소 하나의 알림 종류를 선택해주세요.');
+      return;
+    }
+
+    if (enableDeparture && !departureMessage) {
+      alert('출발 알림 메시지를 입력해주세요.');
+      return;
+    }
+
+    if (enableArrival && !arrivalMessage) {
+      alert('도착 알림 메시지를 입력해주세요.');
+      return;
+    }
+
+    // ✅ 네비게이션 앱 선택 없이 바로 GPS 추적 준비
+    const navInfo = await prepareNavigationInfo(selectedDestinationForNav);
+    if (navInfo) {
+      completeReservation(navInfo);
+    }
+  };
+
+  const completeReservation = (navInfo: NavigationInfo) => {
+    const notifications: Notification[] = [];
+
+    if (enableDeparture) {
+      notifications.push({
+        id: Date.now().toString() + '_dep',
+        type: 'departure',
+        condition: {
+          type: 'time',
+          value: departureCondition,
+          unit: '분',
+        },
+        message: departureMessage,
+        recipient,
+        status: 'pending',
+      });
+    }
+
+    if (enableArrival) {
+      notifications.push({
+        id: Date.now().toString() + '_arr',
+        type: 'arrival',
+        condition: {
+          type: 'time',
+          value: arrivalCondition,
+          unit: '분',
+        },
+        message: arrivalMessage,
+        recipient,
+        status: 'pending',
+      });
+    }
+
+    const trip: Trip = {
+      id: Date.now().toString(),
+      departure: navInfo.departure, // Use actual address from nav
+      destination: navInfo.destination,
+      notifications,
+      status: 'planning',
+      estimatedTime: navInfo.estimatedTime,
+      estimatedDistance: navInfo.distance,
+      recipient,
+      createdAt: new Date().toISOString(),
+    };
+
+    onComplete(trip);
+  };
+
+  const getPlaceIcon = (types?: string[]) => {
+    if (types?.includes('subway_station') || types?.includes('train_station')) {
+      return <Train className="w-5 h-5 text-[#00ff88]" />;
+    }
+    if (types?.includes('bus_station')) {
+      return <Bus className="w-5 h-5 text-[#00ff88]" />;
+    }
+    return <MapPin className="w-5 h-5 text-[#00ff88]" />;
+  };
+
+  if (isSearching) {
+    return (
+      <DestinationSearch
+        onBack={() => setIsSearching(false)}
+        onSelect={handleDestinationSelect}
+        initialQuery={destination}
+      />
+    );
+  }
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#0f2920', color: 'white' }}>
+      {/* Header */}
+      <header className="flex items-center px-4 py-4 border-b border-gray-800 flex-shrink-0">
+        <button onClick={onBack} className="p-2">
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h1 className="flex-1 text-center">알림 예약</h1>
+        <div className="w-10" />
+      </header>
+
+      {/* Scrollable Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', paddingBottom: '8rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Top Banner (Informational) */}
+          <div className="w-full h-16 rounded-2xl border-2 border-[#00ff88] bg-[#1a4d3d] flex items-center justify-center gap-3 text-[#00ff88]">
+            <Navigation className="w-6 h-6" />
+            <span>예약 작성 후 네비게이션과 연결됩니다.</span>
+          </div>
+
+          {/* 네비게이션 정보 표시 */}
+          {navigationInfo && (
+            <div className="bg-[#1a4d3d]/30 border-2 border-[#00ff88]/30 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400 text-sm">연동된 네비게이션</span>
+                <span className="text-[#00ff88]">{navigationInfo.app}</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 flex-1">
+                  <Route className="w-4 h-4 text-[#00ff88]" />
+                  <span className="text-sm">{navigationInfo.distance.toFixed(1)} km</span>
+                </div>
+                <div className="flex items-center gap-2 flex-1">
+                  <Clock className="w-4 h-4 text-[#00ff88]" />
+                  <span className="text-sm">약 {navigationInfo.estimatedTime}분</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 출발지 */}
+          <div className="space-y-3">
+            <Label className="text-gray-400">출발지</Label>
+            <div className="relative">
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#00ff88]" />
+              <Input
+                value={departure}
+                onChange={(e) => setDeparture(e.target.value)}
+                placeholder="서울역"
+                className="w-full bg-transparent border-2 border-gray-700 rounded-2xl h-14 pl-12 text-white placeholder:text-gray-500"
+              />
+            </div>
+          </div>
+
+          {/* 도착지 */}
+          <div className="space-y-3">
+            <Label className="text-gray-400">도착지</Label>
+            <div className="relative">
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#00ff88]" />
+              <button
+                onClick={() => setIsSearching(true)}
+                className="w-full bg-transparent border-2 border-gray-700 rounded-2xl h-14 pl-12 pr-4 text-left text-white flex items-center"
+              >
+                {destination ? (
+                  <span className="truncate">{destination}</span>
+                ) : (
+                  <span className="text-gray-500">도착지를 입력하세요</span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 받는 사람 (Removed from here, moved below) */}
+
+          {/* 구분선 */}
+          <div className="h-px bg-gray-700 my-2" />
+
+          {/* 알림 종류 선택 */}
+          <div className="space-y-3">
+            <Label className="text-gray-400">알림 종류 (중복 선택 가능)</Label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setEnableDeparture(!enableDeparture)}
+                className={`flex-1 h-14 rounded-full border-2 transition-all flex items-center justify-center gap-2 ${enableDeparture
+                  ? ''
+                  : 'border-gray-700 text-gray-400'
+                  }`}
+                style={enableDeparture ? {
+                  borderColor: '#3B82F6',
+                  backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                  color: '#3B82F6'
+                } : {}}
+              >
+                {enableDeparture && <Check className="w-4 h-4" />}
+                출발 알림
+              </button>
+              <button
+                onClick={() => setEnableArrival(!enableArrival)}
+                className={`flex-1 h-14 rounded-full border-2 transition-all flex items-center justify-center gap-2 ${enableArrival
+                  ? 'border-[#00ff88] bg-[#00ff88]/10 text-[#00ff88]'
+                  : 'border-gray-700 text-gray-400'
+                  }`}
+              >
+                {enableArrival && <Check className="w-4 h-4" />}
+                도착 알림
+              </button>
+            </div>
+          </div>
+
+          {/* 받는 사람 (Moved below Notification Type) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-gray-400">
+                <User className="inline w-4 h-4 mr-2" />
+                받는 사람
+              </Label>
+              <button
+                onClick={() => onNavigate('contacts')}
+                className="text-[#00ff88] text-sm"
+              >
+                연락처 관리
+              </button>
+            </div>
+            {recipient.includes('(') ? (
+              <div
+                className="w-full bg-[#1a3d32] border-2 border-gray-700 rounded-2xl min-h-[3.5rem] px-4 py-3 text-white cursor-pointer hover:border-gray-500 flex flex-col justify-center"
+                onClick={() => onNavigate('contacts')}
+              >
+                {recipient.split(',').map((r, idx) => {
+                  const match = r.trim().match(/(.*)\s\((.*)\)/);
+                  if (match) {
+                    return (
+                      <div key={idx} className="flex flex-col mb-2 last:mb-0">
+                        <span className="font-bold text-base">{match[1]}</span>
+                        <span className="text-sm text-gray-400">{match[2]}</span>
+                      </div>
+                    );
+                  }
+                  return <div key={idx} className="text-sm py-1">{r.trim()}</div>;
+                })}
+              </div>
+            ) : (
+              <Input
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="전화번호 또는 이름"
+                className="w-full bg-transparent border-2 border-gray-700 rounded-2xl h-14 px-4 text-white placeholder:text-gray-500"
+              />
+            )}
+          </div>
+
+          {/* 출발 알림 설정 */}
+          {enableDeparture && (
+            <div className="space-y-4 border-t border-gray-800 pt-4">
+              <div className="flex items-center gap-2" style={{ color: '#3B82F6' }}>
+                <MapPin className="w-4 h-4" />
+                <span className="font-bold">출발 알림 설정</span>
+              </div>
+
+              {/* 출발 조건 */}
+              <div className="space-y-3">
+                <Label className="text-gray-400">알림 조건</Label>
+                <div className="flex items-center justify-between bg-transparent border-2 border-gray-700 rounded-2xl h-16 px-6">
+                  <button
+                    onClick={() => setDepartureCondition(Math.max(0, departureCondition - 1))}
+                    className="p-2"
+                  >
+                    <Minus className="w-5 h-5" />
+                  </button>
+                  <span className="text-xl">
+                    {departureCondition === 0 ? (
+                      <span style={{ color: '#3B82F6' }}>출발 즉시</span>
+                    ) : (
+                      <>
+                        출발 <span style={{ color: '#3B82F6' }}>{departureCondition}분</span> 후
+                      </>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => setDepartureCondition(departureCondition + 1)}
+                    className="p-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 출발 메시지 */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-gray-400">메시지</Label>
+                  <button style={{ color: '#3B82F6' }} className="text-sm" onClick={() => openMessageDialog('departure')}>메시지 선택</button>
+                </div>
+                <textarea
+                  value={departureMessage}
+                  onChange={(e) => setDepartureMessage(e.target.value)}
+                  placeholder="출발 메시지를 입력하세요"
+                  className="w-full bg-transparent border-2 border-gray-700 rounded-2xl h-24 p-4 text-white placeholder:text-gray-500 resize-none"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 도착 알림 설정 */}
+          {enableArrival && (
+            <div className="space-y-4 border-t border-gray-800 pt-4">
+              <div className="flex items-center gap-2 text-[#00ff88]">
+                <MapPin className="w-4 h-4" />
+                <span className="font-bold">도착 알림 설정</span>
+              </div>
+
+              {/* 도착 조건 */}
+              <div className="space-y-3">
+                <Label className="text-gray-400">알림 조건</Label>
+                <div className="flex items-center justify-between bg-transparent border-2 border-gray-700 rounded-2xl h-16 px-6">
+                  <button
+                    onClick={() => setArrivalCondition(Math.max(1, arrivalCondition - 1))}
+                    className="p-2"
+                  >
+                    <Minus className="w-5 h-5" />
+                  </button>
+                  <span className="text-xl">
+                    도착 <span className="text-[#00ff88]">{arrivalCondition}분</span> 전
+                  </span>
+                  <button
+                    onClick={() => setArrivalCondition(arrivalCondition + 1)}
+                    className="p-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 도착 메시지 */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-gray-400">메시지</Label>
+                  <button className="text-[#00ff88] text-sm" onClick={() => openMessageDialog('arrival')}>메시지 선택</button>
+                </div>
+                <textarea
+                  value={arrivalMessage}
+                  onChange={(e) => setArrivalMessage(e.target.value)}
+                  placeholder="도착 메시지를 입력하세요"
+                  className="w-full bg-transparent border-2 border-gray-700 rounded-2xl h-24 p-4 text-white placeholder:text-gray-500 resize-none"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 예약 완료 버튼 */}
+          <div className="pt-6 pb-24">
+            <Button
+              onClick={handleStartAndNavigate}
+              className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-14 rounded-2xl border-0 font-bold text-lg"
+            >
+              예약 완료
+            </Button>
+          </div>
+        </div>
+      </div>
+
+
+
+      {/* 메시지 선택 다이얼로그 */}
+      <Dialog open={isMessageDialogOpen} onOpenChange={setIsMessageDialogOpen}>
+        <DialogContent className="bg-[#0f2920] text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>자주 사용하는 메시지 선택</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {savedMessages.map(msg => (
+              <div key={msg.id} className="flex flex-col gap-2 p-3 rounded-xl bg-[#1a3d32] border-2 border-transparent hover:border-[#00ff88] transition-all group">
+                <div className="flex items-start gap-2">
+                  <button
+                    className="flex-1 text-left hover:text-[#00ff88] whitespace-pre-wrap break-words"
+                    onClick={() => handleSelectMessage(msg.text)}
+                  >
+                    {msg.text}
+                  </button>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      className="p-2 hover:bg-[#00ff88]/20 rounded-lg transition-colors"
+                      onClick={() => openEditMessageDialog(msg)}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      className="p-2 hover:bg-red-500/20 rounded-lg transition-colors"
+                      onClick={() => handleDeleteMessage(msg.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                {/* Preview */}
+                <div className="text-xs text-gray-400 bg-[#0f2920] p-2 rounded-lg border border-gray-700">
+                  <MessagePreview template={msg.text} compact={true} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4">
+            <Button className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-2xl border-0 font-bold" onClick={() => setIsAddMessageDialogOpen(true)}>
+              새로운 메시지 추가
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 새로운 메시지 추가 다이얼로그 */}
+      <Dialog open={isAddMessageDialogOpen} onOpenChange={setIsAddMessageDialogOpen}>
+        <DialogContent className="bg-[#0f2920] text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>새로운 메시지 추가</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <textarea
+              ref={newMessageInputRef}
+              value={newMessageText}
+              onChange={(e) => setNewMessageText(e.target.value)}
+              placeholder="메시지를 입력하세요"
+              rows={4}
+              className="w-full bg-transparent border-2 border-gray-700 rounded-2xl p-4 text-white placeholder:text-gray-500 resize-none focus:border-[#00ff88] focus:outline-none"
+            />
+
+            <TemplateTagButtons onInsertTag={handleInsertTagInNewMessage} />
+
+            <MessagePreview template={newMessageText} />
+          </div>
+          <div className="mt-4">
+            <Button className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-2xl border-0 font-bold" onClick={handleAddMessage}>
+              추가
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 메시지 수정 다이얼로그 */}
+      <Dialog open={isEditMessageDialogOpen} onOpenChange={setIsEditMessageDialogOpen}>
+        <DialogContent className="bg-[#0f2920] text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>메시지 수정</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <textarea
+              ref={editMessageInputRef}
+              value={editingMessage?.text || ''}
+              onChange={(e) => setEditingMessage({ ...editingMessage!, text: e.target.value })}
+              placeholder="메시지를 입력하세요"
+              rows={4}
+              className="w-full bg-transparent border-2 border-gray-700 rounded-2xl p-4 text-white placeholder:text-gray-500 resize-none focus:border-[#00ff88] focus:outline-none"
+            />
+
+            <TemplateTagButtons onInsertTag={handleInsertTagInEditMessage} />
+
+            <MessagePreview template={editingMessage?.text || ''} />
+          </div>
+          <div className="mt-4">
+            <Button className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-2xl border-0 font-bold" onClick={handleEditMessage}>
+              수정
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 네비게이션 앱 선택 다이얼로그 */}
+      <Dialog open={isNavAppDialogOpen} onOpenChange={setIsNavAppDialogOpen}>
+        <DialogContent className="bg-[#1a3d32] border-gray-700 text-white w-[90%] rounded-2xl" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>네비게이션 앱 선택</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              경로 안내에 사용할 앱을 선택하세요
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            {installedNavApps.map(app => (
+              <button
+                key={app.id}
+                onClick={() => handleSelectNavApp(app.id, false)}
+                className="w-full p-4 rounded-xl bg-[#0f2920] hover:bg-[#1a4d3d] border-2 border-gray-700 hover:border-[#00ff88] transition-all group"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[#00ff88]/20 flex items-center justify-center flex-shrink-0">
+                      <Navigation className="w-5 h-5 text-[#00ff88]" />
+                    </div>
+                    <span className="text-lg font-bold whitespace-nowrap">{app.name}</span>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-[#00ff88] flex-shrink-0" />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="pt-4 border-t border-gray-700">
+            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded border-gray-600 text-[#00ff88] focus:ring-[#00ff88]"
+                onChange={(e) => {
+                  if (e.target.checked && installedNavApps.length > 0) {
+                    handleSelectNavApp(installedNavApps[0].id, true);
+                  }
+                }}
+              />
+              <span>다음부터 이 앱으로 자동 실행</span>
+            </label>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div >
+  );
+}

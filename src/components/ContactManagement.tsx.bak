@@ -1,0 +1,807 @@
+import { useState, useEffect } from 'react';
+// 사용하지 않는 아이콘(Phone, X, ChevronDown, Tag 등) 제거하여 깔끔하게 정리했습니다.
+import { ArrowLeft, Search, Plus, User, Star, Edit2, Trash2, Check, Users, MoreVertical, Smartphone, UserPlus } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import type { Screen, Contact } from '../App';
+import { AdMob } from '@capacitor-community/admob';
+import { Capacitor } from '@capacitor/core';
+
+// 그룹 타입 정의
+type ContactGroup = 'none' | 'family' | 'friends' | 'work' | 'vip';
+
+interface ExtendedContact extends Contact {
+  group?: ContactGroup;
+}
+
+interface ContactManagementProps {
+  onNavigate: (screen: Screen) => void;
+  onSelectContacts?: (contacts: Contact[]) => void;
+  selectionMode?: boolean;
+  contacts: Contact[];
+  setContacts: (contacts: Contact[]) => void;
+  mode?: 'manage' | 'select'; // 관리 모드 또는 선택 모드
+  onContactSelect?: (contact: Contact) => void; // 선택 모드에서 연락처 선택 시 콜백
+  fromScreen?: Screen; // 뒤로가기 시 이동할 화면
+  initialSelectedContacts?: Contact[]; // Added: 초기 선택된 연락처
+}
+
+const groupLabels: Record<ContactGroup, { name: string; color: string; bgColor: string }> = {
+  none: { name: '없음', color: 'text-gray-500', bgColor: 'bg-gray-500/20' },
+  family: { name: '가족', color: 'text-pink-400', bgColor: 'bg-pink-400/20' },
+  friends: { name: '친구', color: 'text-blue-400', bgColor: 'bg-blue-400/20' },
+  work: { name: '직장', color: 'text-purple-400', bgColor: 'bg-purple-400/20' },
+  vip: { name: 'VIP', color: 'text-yellow-400', bgColor: 'bg-yellow-400/20' },
+};
+
+export function ContactManagement({
+  onNavigate,
+  onSelectContacts,
+  selectionMode = false,
+  contacts: propContacts,
+  setContacts: propSetContacts,
+  mode = 'manage',
+  onContactSelect,
+  fromScreen = 'settings',
+  initialSelectedContacts = []
+}: ContactManagementProps) {
+  // Hide AdMob banner when entering this screen
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      AdMob.hideBanner().catch(err => console.error('Failed to hide banner:', err));
+    }
+  }, []);
+
+  // Use props for contacts state
+  const contacts = propContacts as ExtendedContact[];
+
+  // 래퍼 함수: 그룹 정보 동기화
+  const setContacts = (newContacts: Contact[]) => {
+    const syncedContacts = newContacts.map(c => {
+      const ec = c as ExtendedContact;
+      if (ec.group && (!ec.groups || !ec.groups.includes(ec.group))) {
+        return { ...ec, groups: [ec.group] };
+      }
+      return ec;
+    });
+    propSetContacts(syncedContacts);
+  };
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: React.ReactNode;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: null,
+    onConfirm: () => { }
+  });
+  const [selectedContact, setSelectedContact] = useState<ExtendedContact | null>(null);
+
+  // Initialize with passed IDs
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>(
+    initialSelectedContacts.map(c => c.id)
+  );
+
+  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
+  // isGroupMenuOpen은 사용되지 않아 제거했습니다.
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<string | null>(null);
+
+  // 새 연락처 추가용 상태
+  const [newContact, setNewContact] = useState<ExtendedContact>({
+    id: '',
+    name: '',
+    phone: '',
+    isFavorite: false,
+    type: 'phone',
+    group: 'none',
+    groups: ['none'],
+  });
+
+  const filteredContacts = contacts.filter(
+    contact =>
+      contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      contact.phone.includes(searchQuery)
+  );
+
+  const favoriteContacts = filteredContacts.filter(c => c.isFavorite);
+  const regularContacts = filteredContacts.filter(c => !c.isFavorite);
+
+  const toggleFavorite = (id: string) => {
+    setContacts(contacts.map(c =>
+      c.id === id ? { ...c, isFavorite: !c.isFavorite } : c
+    ));
+  };
+
+  const handleImportContacts = async () => {
+    setIsImportMenuOpen(false);
+
+    // [V46] Explicitly save current screen to handle OS restart
+    localStorage.setItem('currentScreen', mode === 'select' ? 'contacts' : 'contactsManage');
+    console.log('💾 [ContactManagement] Saved currentScreen before import:', mode === 'select' ? 'contacts' : 'contactsManage');
+
+    try {
+      console.log('📱 연락처 불러오기 시작');
+
+      if (!Capacitor.isNativePlatform()) {
+        alert('연락처 기능은 앱에서만 작동합니다.');
+        return;
+      }
+
+      // [V27 Fix] Dynamic Import & Error Handling
+      let ContactsPlugin;
+      try {
+        const { Contacts } = await import('@capacitor-community/contacts');
+        ContactsPlugin = Contacts;
+      } catch (importError) {
+        console.error("Plugin import failed:", importError);
+        alert("연락처 플러그인을 불러올 수 없습니다.");
+        return;
+      }
+
+      // Pick Contact - Minimal Projection to prevent crashes
+      try {
+        const result = await ContactsPlugin.pickContact({
+          projection: { name: true, phones: true }
+        });
+
+        if (!result || !result.contact) {
+          console.log("No contact selected");
+          return;
+        }
+
+        const contact = result.contact;
+        console.log("Picked:", contact);
+
+        const name = contact.name?.display || '이름 없음';
+        const phone = contact.phones?.[0]?.number || '';
+
+        if (!phone) {
+          alert('전화번호가 없는 연락처입니다.');
+          return;
+        }
+
+        // Logic: Add Contact
+        const normalizedPhone = phone.replace(/-/g, '');
+        const isDuplicate = contacts.some(c => c.phone.replace(/-/g, '') === normalizedPhone);
+
+        if (isDuplicate) {
+          alert('이미 등록된 번호입니다.');
+          return;
+        }
+
+        const newContact: ExtendedContact = {
+          id: `import-${Date.now()}`,
+          name: name,
+          phone: phone,
+          phoneNumber: normalizedPhone,
+          isFavorite: false,
+          type: 'phone',
+          group: 'none',
+          groups: ['none'],
+        };
+
+        setContacts([...contacts, newContact]);
+
+      } catch (pickError) {
+        console.error("Pick Contact Failed:", pickError);
+      }
+
+    } catch (error: any) {
+      console.error('Import process failed:', error);
+    }
+  };
+
+  const handleImportAllContacts = async () => {
+    setIsImportMenuOpen(false);
+    try {
+      console.log('📱 전체 연락처 불러오기 시작');
+
+      // [V30 Check] Native Only
+      if (!Capacitor.isNativePlatform()) {
+        alert("이 기능은 앱에서만 사용할 수 있습니다.");
+        return;
+      }
+
+      const { Contacts } = await import('@capacitor-community/contacts');
+
+      // Request Permission
+      try {
+        const permission = await Contacts.requestPermissions();
+        if (permission.contacts !== 'granted') {
+          alert('연락처 접근 권한이 필요합니다.\n설정에서 권한을 허용해주세요.');
+          return;
+        }
+      } catch (permError) {
+        console.error("Permission request failed:", permError);
+        alert("권한 요청 중 오류가 발생했습니다.");
+        return;
+      }
+
+      // Get Contacts with Minimal Projection (Name & Phone ONLY)
+      // fetching images or organizations causes OutOfMemory on some devices
+      const result = await Contacts.getContacts({
+        projection: {
+          name: true,
+          phones: true,
+        }
+      });
+
+      if (!result.contacts || result.contacts.length === 0) {
+        alert('저장된 연락처가 없습니다.');
+        return;
+      }
+
+      let addedCount = 0;
+      const newContacts: ExtendedContact[] = [];
+
+      // Batch Process to prevent UI freeze
+      // Using simple loop for now, but safeguards added
+      for (const contact of result.contacts) {
+        const name = contact.name?.display || '이름 없음';
+        // take first phone number
+        const phone = contact.phones?.[0]?.number || '';
+
+        if (phone) {
+          const normalizedPhone = phone.replace(/-/g, '');
+
+          // Duplicate Check
+          const isDuplicate = contacts.some(c => c.phone.replace(/-/g, '') === normalizedPhone) ||
+            newContacts.some(c => c.phone.replace(/-/g, '') === normalizedPhone);
+
+          if (!isDuplicate) {
+            newContacts.push({
+              id: `import-all-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              name: name,
+              phone: phone,
+              phoneNumber: normalizedPhone,
+              isFavorite: false,
+              type: 'phone',
+              group: 'none',
+              groups: ['none']
+            });
+            addedCount++;
+          }
+        }
+      }
+
+      if (addedCount > 0) {
+        setContacts([...contacts, ...newContacts]);
+        alert(`${addedCount}명의 연락처를 불러왔습니다.`);
+      } else {
+        alert('새로 추가할 연락처가 없습니다 (모두 중복됨).');
+      }
+
+    } catch (error: any) {
+      console.error('❌ 전체 연락처 불러오기 오류:', error);
+      alert('전체 연락처 불러오기 중 오류가 발생했습니다: ' + (error.message || JSON.stringify(error)));
+    }
+  };
+
+  const handleAddNewContact = () => {
+    if (!newContact.name || !newContact.phone) {
+      alert('이름과 전화번호를 입력해주세요.');
+      return;
+    }
+
+    const contactToAdd: ExtendedContact = {
+      ...newContact,
+      id: Date.now().toString() + Math.random(),
+      phoneNumber: newContact.phone.replace(/-/g, ''),
+      groups: [newContact.group || 'none'],
+    };
+
+    setContacts([...contacts, contactToAdd]);
+    setIsAddDialogOpen(false);
+    setNewContact({
+      id: '',
+      name: '',
+      phone: '',
+      isFavorite: false,
+      type: 'phone',
+      group: 'none',
+      groups: ['none'],
+    });
+  };
+
+  const handleEditContact = () => {
+    if (!selectedContact) return;
+
+    const updatedContact = {
+      ...selectedContact,
+      phoneNumber: selectedContact.phone.replace(/-/g, ''),
+      groups: [selectedContact.group || 'none']
+    };
+
+    setContacts(contacts.map(c =>
+      c.id === selectedContact.id ? updatedContact : c
+    ));
+    setIsEditDialogOpen(false);
+    setSelectedContact(null);
+  };
+
+  const handleDeleteContact = (id: string) => {
+    const contact = contacts.find(c => c.id === id);
+    // [Revert] Use Window Confirm
+    if (window.confirm(`'${contact?.name}' 연락처를 삭제하시겠습니까?`)) {
+      setContacts(contacts.filter(c => c.id !== id));
+    }
+  };
+
+  const openEditDialog = (contact: ExtendedContact) => {
+    setSelectedContact({ ...contact });
+    setIsEditDialogOpen(true);
+  };
+
+  const openAddDialog = () => {
+    setIsImportMenuOpen(false);
+    setIsAddDialogOpen(true);
+  };
+
+  const toggleContactSelection = (id: string) => {
+    setSelectedContactIds(prev =>
+      prev.includes(id)
+        ? prev.filter(cId => cId !== id)
+        : [...prev, id]
+    );
+  };
+
+  const handleConfirmSelection = () => {
+    if (selectedContactIds.length === 0) {
+      alert('최소 1개 이상의 연락처를 선택해주세요.');
+      return;
+    }
+
+    const selected = contacts.filter(c => selectedContactIds.includes(c.id));
+    onSelectContacts?.(selected);
+    onNavigate('setup');
+  };
+
+  const updateContactGroup = (contactId: string, group: ContactGroup) => {
+    setContacts(contacts.map(c =>
+      c.id === contactId ? { ...c, group, groups: [group] } : c
+    ));
+    // isGroupMenuOpen state removal cleanup
+  };
+
+  const renderContact = (contact: ExtendedContact, isFavorite: boolean) => {
+    const isSelected = selectedContactIds.includes(contact.id);
+    const groupInfo = groupLabels[contact.group as ContactGroup || 'none'];
+
+    return (
+      <div
+        key={contact.id}
+        className={`bg-[#1a3d32] rounded-2xl p-3 transition-all ${mode === 'select' || selectionMode ? 'cursor-pointer' : ''
+          } ${isSelected ? 'ring-2 ring-[#00ff88] bg-[#00ff88]/10' : ''
+          }`}
+        onClick={() => {
+          if (mode === 'select' || selectionMode) {
+            toggleContactSelection(contact.id);
+          } else {
+            // Manage mode: maybe open edit?
+            // openEditDialog(contact); // Optional improvement
+          }
+        }}
+      >
+        <div className="flex items-center gap-2">
+          {(mode === 'select' || selectionMode) && (
+            <div
+              className={`w-6 h-6 rounded-full border-2 flex items-center justify-center cursor-pointer flex-shrink-0 ${isSelected ? 'bg-[#00ff88] border-[#00ff88]' : 'border-gray-500'
+                }`}
+            >
+              {isSelected && (
+                <div className="w-3 h-3 rounded-full bg-[#0f2920]" />
+              )}
+            </div>
+          )}
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isFavorite ? 'bg-[#00ff88]' : 'bg-[#234a3d]'
+            }`}>
+            <User className={`w-5 h-5 ${isFavorite ? 'text-[#0f2920]' : 'text-gray-400'}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-white mb-0.5 flex items-center gap-2 flex-wrap">
+              <span className="truncate font-medium">{contact.name}</span>
+              {contact.group && contact.group !== 'none' && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${groupInfo.bgColor} ${groupInfo.color}`}>
+                  {groupInfo.name}
+                </span>
+              )}
+            </div>
+            <div className="text-gray-400 text-xs truncate">{contact.phone}</div>
+          </div>
+
+          {(
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFavorite(contact.id);
+                }}
+                className="p-1.5 hover:bg-[#0f2920] rounded-lg transition-colors active:scale-95"
+              >
+                <Star className={`w-4 h-4 ${isFavorite ? 'text-[#00ff88]' : 'text-gray-500'}`} fill={isFavorite ? '#00ff88' : 'none'} />
+              </button>
+
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMoreMenuOpen(isMoreMenuOpen === contact.id ? null : contact.id);
+                  }}
+                  className="p-1.5 hover:bg-[#0f2920] rounded-lg transition-colors active:scale-95"
+                >
+                  <MoreVertical className="w-4 h-4 text-gray-400" />
+                </button>
+
+                {isMoreMenuOpen === contact.id && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setIsMoreMenuOpen(null)}
+                    />
+                    <div className="absolute right-0 top-10 z-20 bg-[#0f2920] border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[200px]">
+                      <div className="border-b border-gray-700">
+                        <div className="px-3 py-2 text-xs text-gray-400">그룹 설정</div>
+                        {(Object.keys(groupLabels) as ContactGroup[]).map((group) => {
+                          const info = groupLabels[group];
+                          return (
+                            <button
+                              key={group}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateContactGroup(contact.id, group);
+                              }}
+                              className={`w-full px-4 py-2.5 text-left hover:bg-[#234a3d] flex items-center gap-2 transition-colors ${contact.group === group ? 'bg-[#234a3d]' : ''
+                                }`}
+                            >
+                              <span className={`w-2 h-2 rounded-full ${info.bgColor.replace('/20', '')}`}></span>
+                              <span className={info.color}>{info.name}</span>
+                              {contact.group === group && <Check className="w-4 h-4 ml-auto text-[#00ff88]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsMoreMenuOpen(null);
+                          openEditDialog(contact);
+                        }}
+                        className="w-full px-4 py-3 text-left hover:bg-[#234a3d] flex items-center gap-3 transition-colors"
+                      >
+                        <Edit2 className="w-5 h-5 text-yellow-400" />
+                        <span className="text-white">연락처 수정</span>
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsMoreMenuOpen(null);
+                          handleDeleteContact(contact.id);
+                        }}
+                        className="w-full px-4 py-3 text-left hover:bg-[#234a3d] flex items-center gap-3 transition-colors border-t border-gray-700"
+                      >
+                        <Trash2 className="w-5 h-5 text-red-400" />
+                        <span className="text-red-400">연락처 삭제</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen bg-[#0f2920] text-white">
+      <header className="pt-safe mt-4 flex items-center px-4 py-4 border-b border-gray-800">
+        <button onClick={() => onNavigate(mode === 'select' ? fromScreen : 'settings')} className="p-2">
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h1 className="flex-1 text-center">연락처 관리</h1>
+        <div className="relative">
+          <button
+            onClick={() => setIsImportMenuOpen(!isImportMenuOpen)}
+            className="p-2"
+          >
+            <Plus className="w-6 h-6 text-[#00ff88]" />
+          </button>
+
+          {isImportMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setIsImportMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-12 z-20 bg-[#1a3d32] border border-gray-700 rounded-2xl shadow-xl overflow-hidden min-w-[200px]">
+
+                <button
+                  onClick={handleImportContacts}
+                  className="w-full px-4 py-3 text-left hover:bg-[#234a3d] flex items-center gap-3 transition-colors"
+                >
+                  <Smartphone className="w-5 h-5 text-[#00ff88]" />
+                  <div>
+                    <div className="font-medium">연락처 하나씩 불러오기</div>
+                    <div className="text-xs text-gray-400">기본 연락처 앱 실행</div>
+                  </div>
+                </button>
+                <button
+                  onClick={handleImportAllContacts}
+                  className="w-full px-4 py-3 text-left hover:bg-[#234a3d] flex items-center gap-3 border-t border-gray-700"
+                >
+                  <Users className="w-5 h-5 text-[#00ff88]" />
+                  <div>
+                    <div className="font-medium">전체 연락처 불러오기</div>
+                    <div className="text-xs text-gray-400">한번에 모두 가져오기</div>
+                  </div>
+                </button>
+                <button
+                  onClick={openAddDialog}
+                  className="w-full px-4 py-3 text-left hover:bg-[#234a3d] flex items-center gap-3 border-t border-gray-700"
+                >
+                  <UserPlus className="w-5 h-5 text-[#00ff88]" />
+                  <div>
+                    <div className="font-medium">직접 입력하기</div>
+                    <div className="text-xs text-gray-400">이름/번호 직접 입력</div>
+                  </div>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </header>
+
+      <div className="px-6 py-4">
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="이름 또는 전화번호 검색"
+            className="w-full bg-[#1a3d32] border-0 rounded-2xl h-12 pl-12 text-white placeholder:text-gray-500"
+          />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 pb-6 mb-20">
+        {favoriteContacts.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Star className="w-4 h-4 text-[#00ff88]" fill="#00ff88" />
+              <h2 className="text-sm text-gray-400">즐겨찾기</h2>
+            </div>
+            <div className="space-y-2">
+              {favoriteContacts.map((contact) => renderContact(contact, true))}
+            </div>
+          </div>
+        )}
+
+        {regularContacts.length > 0 && (
+          <div>
+            <h2 className="text-sm text-gray-400 mb-3">모든 연락처</h2>
+            <div className="space-y-2">
+              {regularContacts.map((contact) => renderContact(contact, false))}
+            </div>
+          </div>
+        )}
+
+        {filteredContacts.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-64 text-center text-gray-400">
+            <User className="w-16 h-16 mb-4" />
+            <p>연락처가 없습니다</p>
+            <button
+              onClick={openAddDialog}
+              className="mt-4 text-[#00ff88] hover:underline"
+            >
+              연락처 추가하기
+            </button>
+          </div>
+        )}
+      </div>
+
+      {selectionMode && mode !== 'select' && (
+        <div className="fixed bottom-0 left-0 right-0 bg-[#0f2920] border-t border-gray-800 px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <Button
+            onClick={handleConfirmSelection}
+            disabled={selectedContactIds.length === 0}
+            className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-14 rounded-2xl border-0 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+          >
+            선택 완료 ({selectedContactIds.length})
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="destructive"
+              className="flex-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 border-none h-12 rounded-xl"
+              onClick={() => {
+                if (window.confirm(`선택한 ${selectedContactIds.length}개의 연락처를 삭제하시겠습니까?`)) {
+                  const remaining = contacts.filter(c => !selectedContactIds.includes(c.id));
+                  setContacts(remaining);
+                  setSelectedContactIds([]);
+                }
+              }}
+            >
+              <Trash2 className="w-5 h-5 mr-2" />
+              삭제
+            </Button>
+            <Button
+              className="flex-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 border-none h-12 rounded-xl"
+              onClick={() => alert('그룹 관리 기능은 준비 중입니다.')}
+            >
+              <Edit2 className="w-5 h-5 mr-2" />
+              그룹 관리
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent className="bg-[#1a3d32] border-gray-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">연락처 추가</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">이름</label>
+              <Input
+                value={newContact.name}
+                onChange={(e) => setNewContact({ ...newContact, name: e.target.value })}
+                placeholder="이름을 입력하세요"
+                className="w-full bg-[#0f2920] border-gray-700 rounded-xl h-12 text-white placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">전화번호</label>
+              <Input
+                value={newContact.phone}
+                onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+                placeholder="010-0000-0000"
+                className="w-full bg-[#0f2920] border-gray-700 rounded-xl h-12 text-white placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">그룹</label>
+              <div className="grid grid-cols-5 gap-2">
+                {(Object.keys(groupLabels) as ContactGroup[]).map((group) => {
+                  const info = groupLabels[group];
+                  const isSelected = newContact.group === group;
+                  return (
+                    <button
+                      key={group}
+                      onClick={() => setNewContact({ ...newContact, group })}
+                      className={`px-3 py-2 rounded-lg text-xs transition-all ${isSelected
+                        ? `${info.bgColor} ${info.color} ring-2 ring-current`
+                        : 'bg-[#0f2920] text-gray-400 hover:bg-[#234a3d]'
+                        }`}
+                    >
+                      {info.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <Button
+                onClick={() => setIsAddDialogOpen(false)}
+                variant="outline"
+                className="flex-1 bg-transparent border-gray-700 text-white h-12 rounded-xl"
+              >
+                취소
+              </Button>
+              <Button
+                onClick={handleAddNewContact}
+                className="flex-1 bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-xl border-0"
+              >
+                추가
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="bg-[#1a3d32] border-gray-700 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-white">연락처 수정</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">이름</label>
+              <Input
+                value={selectedContact?.name || ''}
+                onChange={(e) => setSelectedContact({ ...selectedContact!, name: e.target.value })}
+                placeholder="이름을 입력하세요"
+                className="w-full bg-[#0f2920] border-gray-700 rounded-xl h-12 text-white placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">전화번호</label>
+              <Input
+                value={selectedContact?.phone || ''}
+                onChange={(e) => setSelectedContact({ ...selectedContact!, phone: e.target.value })}
+                placeholder="010-0000-0000"
+                className="w-full bg-[#0f2920] border-gray-700 rounded-xl h-12 text-white placeholder:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">그룹</label>
+              <div className="grid grid-cols-5 gap-2">
+                {(Object.keys(groupLabels) as ContactGroup[]).map((group) => {
+                  const info = groupLabels[group];
+                  const isSelected = selectedContact?.group === group;
+                  return (
+                    <button
+                      key={group}
+                      onClick={() => setSelectedContact({ ...selectedContact!, group })}
+                      className={`px-3 py-2 rounded-lg text-xs transition-all ${isSelected
+                        ? `${info.bgColor} ${info.color} ring-2 ring-current`
+                        : 'bg-[#0f2920] text-gray-400 hover:bg-[#234a3d]'
+                        }`}
+                    >
+                      {info.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <Button
+                onClick={() => setIsEditDialogOpen(false)}
+                variant="outline"
+                className="flex-1 bg-transparent border-gray-700 text-white h-12 rounded-xl"
+              >
+                취소
+              </Button>
+              <Button
+                onClick={handleEditContact}
+                className="flex-1 bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-12 rounded-xl border-0"
+              >
+                저장
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {mode === 'select' && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#0f2920] border-t border-gray-800 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <Button
+            onClick={() => {
+              if (onSelectContacts && selectedContactIds.length > 0) {
+                const selectedContactsList = contacts.filter(c => selectedContactIds.includes(c.id));
+                onSelectContacts(selectedContactsList);
+                // onNavigate is handled by onSelectContacts (in App.tsx) to prevent double-navigation
+                // onNavigate(fromScreen); 
+              } else if (onContactSelect && selectedContact) {
+                onContactSelect(selectedContact);
+                onNavigate(fromScreen);
+              }
+            }}
+            disabled={selectedContactIds.length === 0 && !selectedContact}
+            className="w-full bg-[#00ff88] hover:bg-[#00dd77] text-[#0f2920] h-14 rounded-xl border-0 font-semibold disabled:opacity-50"
+          >
+            {selectedContactIds.length > 0 ? `${selectedContactIds.length}명 선택` : '선택'}
+          </Button>
+        </div>
+      )}
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmState.isOpen}
+        onClose={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmState.onConfirm}
+        title={confirmState.title}
+        message={confirmState.message}
+      />
+    </div>
+  );
+}

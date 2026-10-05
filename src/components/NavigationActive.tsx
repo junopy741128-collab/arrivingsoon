@@ -1,0 +1,1189 @@
+// V17-FORCE-UPDATE-0207
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { MapPin, Navigation, Check, Loader2 } from 'lucide-react';
+import { Button } from './ui/button';
+import { formatRecipientDisplay } from '../utils/formatters';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import type { Trip, Screen } from '../App';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import Overlay from '../utils/overlay';
+import { TripNotification } from '../plugins/TripNotificationPlugin';
+import LocalSms from '../plugins/LocalSmsPlugin';
+import { STORE_CONFIG } from '../config/storeConfig';
+import { reverseGeocodeKakao } from '../utils/kakao-service';
+import { TripLogViewer } from './TripLogViewer';
+import { AlertModal } from './AlertModal';
+import markerRed from '../assets/pin_red_v18.png';
+import { TripCompletionModal } from './TripCompletionModal';
+
+
+
+
+// Helper functions (Removed replaceTemplateVariables)
+
+// Helper: Haversine Distance
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
+};
+
+// [Fix] Waypoint Sorting Logic
+const sortWaypointsByDistance = (waypoints: any[], startLat: number, startLng: number) => {
+  if (!startLat || !startLng) return waypoints;
+  return [...waypoints].sort((a, b) => {
+    const dA = calculateDistance(startLat, startLng, a.lat || 0, a.lng || 0);
+    const dB = calculateDistance(startLat, startLng, b.lat || 0, b.lng || 0);
+    return dA - dB;
+  });
+};
+
+interface NavigationActiveProps {
+  trip: Trip;
+  onUpdate: (trip: Trip) => void;
+  onCancel: () => void;
+  onEdit?: (trip: Trip) => void;
+  onComplete: (latestTrip?: Trip) => void; // [Fix] 최신 trip 데이터 전달 (sentMessages, completedAt 포함)
+  onNavigate: (screen: Screen) => void;
+  userPoints: number;
+  deductPoints: (amount: number, description?: string) => void;
+}
+
+// --- Progress Step UI ---
+// --- Progress Step UI ---
+const ProgressSteps = ({ status, distance, totalDistance, waypointsStr, nativeProgress, startLat, startLng }:
+  { status: string, distance: number, totalDistance: number, waypointsStr?: string, nativeProgress?: number, startLat?: number, startLng?: number }) => {
+
+  // Parse Waypoints with safety
+  let waypoints: any[] = [];
+  try {
+    const parsed = waypointsStr ? JSON.parse(waypointsStr) : [];
+    waypoints = Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error("Failed to parse waypoints:", e);
+    waypoints = [];
+  }
+  // [Fix] Sort by distance from start
+  if (startLat && startLng && waypoints.length > 1) {
+    waypoints = sortWaypointsByDistance(waypoints, startLat, startLng);
+  }
+  // const hasWaypoints = waypoints.length > 0;
+
+  // Calculate Progress % (Inverse of remaining distance)
+  // Distance is Step-down (20km -> 0).
+  // Progress = 1 - (current / total)
+  let progress = 0;
+
+  if (nativeProgress !== undefined && nativeProgress >= 0) {
+    progress = nativeProgress; // [v59] Use Native Precision Progress
+  } else if (totalDistance > 0) {
+    progress = Math.max(0, Math.min(1, 1 - (distance / totalDistance)));
+  }
+
+  // If Waiting, Progress is 0.
+  if (status === 'waiting') progress = 0;
+
+  // Steps Configuration
+  // Always: Start, End
+  // Optional: WPs
+
+  const steps = [
+    { id: 'start', label: status === 'waiting' ? '대기' : '출발', icon: '🚀', pos: 0 },
+    ...waypoints.map((wp: any, idx: number) => ({
+      id: `wp-${idx}`,
+      label: wp.name || `경유${idx + 1}`,
+      icon: '📍',
+      pos: (idx + 1) / (waypoints.length + 1) // Distribute evenly
+    })),
+    { id: 'end', label: '도착', icon: '🏁', pos: 1 }
+  ];
+
+  // Adjust positions if only Start/End?
+  // If no WPs, maybe show "Driving" in middle?
+  // User asked to "reduce gap".
+  // Let's stick to even distribution.
+
+  return (
+    <div className="w-full px-6 py-4 bg-gray-900 rounded-xl relative overflow-hidden">
+      {/* Progress Bar Background & Active Line & Truck Container */}
+      <div className="absolute top-8 left-9 right-9 h-1 bg-gray-700 rounded z-0">
+        {/* Active Progress Line */}
+        <div
+          className="h-full bg-green-500 rounded transition-all duration-1000 ease-linear"
+          style={{ width: `${progress * 100}%` }}
+        />
+
+        {/* Moving Truck Icon (The Indicator) */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 transition-all duration-1000 ease-linear z-20"
+          style={{ left: `${progress * 100}%`, transform: 'translate(-50%, -50%)' }}
+        >
+          {/* Only show Truck if Active and Not Arrived */}
+          {status !== 'waiting' && distance > 200 && (
+            <div className="w-8 h-8 bg-green-500 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-sm animate-bounce">
+              🚚
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex justify-between items-start relative z-10 w-full">
+        {steps.map((step, idx) => {
+          // Highlight logic
+          // Passed if progress > step.pos
+          // But Start is always passed if Active.
+          const isPassed = progress >= step.pos;
+          // const isNext = !isPassed && (idx === 0 || progress >= steps[idx - 1].pos);
+
+          return (
+            <div key={idx} className="flex flex-col items-center" style={{ width: '40px' }}>
+              <div className={`
+                w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-all duration-300
+                ${isPassed || (idx === 0 && status === 'active') ? 'bg-green-600 border-green-400 text-white' : 'bg-gray-800 border-gray-600 text-gray-400'}
+              `}>
+                {step.icon}
+              </div>
+              <span className={`text-[9px] mt-1 font-medium text-center truncate w-14 ${isPassed ? 'text-green-400' : 'text-gray-500'}`}>
+                {step.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export function NavigationActive({ trip, onUpdate, onCancel, onEdit, onComplete, onNavigate, deductPoints }: NavigationActiveProps) {
+  // State
+  const [navigationStatus, setNavigationStatus] = useState<'waiting' | 'active' | 'completed'>('waiting'); // Smart Start Mode
+  const [currentTime, setCurrentTime] = useState(trip.estimatedTime || 0);
+  const [currentDistance, setCurrentDistance] = useState(trip.estimatedDistance || 0);
+  // Fix: Default to 'active' (Green) initially to avoid scaring user, or handle 'waiting' explicitly
+  const [status, setStatus] = useState<'active' | 'completed' | 'error'>('active');
+  const [heading, setHeading] = useState(0); // Heading State
+
+  const [isCheckingInitialStatus, setIsCheckingInitialStatus] = useState(true); // Prevent flash of map
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [isCancelCompleteDialogOpen, setIsCancelCompleteDialogOpen] = useState(false);
+  const [isLogViewerOpen, setIsLogViewerOpen] = useState(false); // New state
+  const [alertState, setAlertState] = useState({ open: false, message: '' });
+  const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
+  // Manual Send State
+  // Removed ununsed manual send dialog state
+
+  // [V27] Modal State
+  const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false);
+  const [finalDeduction, setFinalDeduction] = useState(0);
+  // [Fix] 도착 트리거 발생 시간 (모달 열린 시간이 아닌 실제 도착 시간)
+  const [arrivalCompletedAt, setArrivalCompletedAt] = useState<string>('');
+  // [Fix] ref로도 보관 → handleTripCompletion이 나중에 호출될 때도 정확한 시각 참조 가능
+  const arrivalTimeRef = useRef<string>('');
+
+  // UI State
+  // const [progressPercent, setProgressPercent] = useState(0);
+  // UI State
+  const [currentProgress, setCurrentProgress] = useState(0); 
+  const displayProgress = useMemo(() => {
+    if (navigationStatus === 'completed') return 100;
+    if (navigationStatus === 'waiting') return 0; // [Fix] 출발 대기 중 상태는 항상 0% 완료 처리
+    
+    // Explicit Progress from Native Service (0-100)
+    if (currentProgress > 0) return currentProgress;
+    
+    // Fallback Calculation from remaining distance
+    if (trip.estimatedDistance && currentDistance >= 0) {
+      const total = trip.estimatedDistance;
+      const current = currentDistance;
+      const p = ((total - current) / total) * 100;
+      return Math.max(0, Math.min(100, p));
+    }
+    return 0;
+  }, [currentProgress, currentDistance, trip.estimatedDistance, navigationStatus]);
+  const watchId = useRef<string | null>(null);
+  const departureNotificationSentRef = useRef(false);
+  const notificationsRef = useRef(trip.notifications);
+  const tripRef = useRef(trip);
+  const isInitializedRef = useRef(false); // [Fix] Prevent double init
+  const isPaymentProcessedRef = useRef(false); // [Fix] 결제 중복 실행 방지 (isFinishedRef와 별도)
+
+  // [v53] Throttling Refs for Geocoding (Moved to Top Level)
+  // const lastGeoUpdateTime = useRef(0);
+  // const lastGeoUpdatePos = useRef({ lat: 0, lng: 0 });
+
+  useEffect(() => {
+    notificationsRef.current = trip.notifications;
+    tripRef.current = trip;
+  }, [trip]);
+
+  // ... (existing code)
+  // DEBUG: Log currentDistance changes
+  useEffect(() => {
+    console.log("🔵 [DEBUG] currentDistance changed to:", currentDistance);
+  }, [currentDistance]);
+
+  // --- [NEW] Smart Arrival Completion Logic (Moved UP for Scope) ---
+  const handleTripCompletion = async (_triggerSmsIfNeeded: boolean, arrivalData?: { completedAtStr?: string, arrivalTimestamp?: number }) => {
+    // [CRITICAL FIX] 중복 호출 완전 차단
+    if (isFinishedRef.current) {
+      console.log("🚫 [Smart Logic] handleTripCompletion 중복 호출 무시 (이미 처리됨)");
+      return;
+    }
+    isFinishedRef.current = true; // Lock - 이후 모든 중복 호출 차단
+
+    console.log("🏁 [Smart Logic] Trip Completion Triggered - 모달 표시");
+
+    // Clear JS Watch immediately
+    if (watchId.current !== null) {
+      await Geolocation.clearWatch({ id: watchId.current });
+      watchId.current = null;
+    }
+
+    // [Fix] 도착 시간 설정:
+    //   우선순위: ref(발송이벤트에서 캡처) > arrivalData.completedAtStr > trip.completedAt > 현재 시각
+    const now = new Date();
+    const finalCompletedAt = 
+      arrivalTimeRef.current ||              // 1순위: tripNotificationSent에서 즉시 캡처한 시각
+      arrivalData?.completedAtStr ||         // 2순위: 네이티브 tripStateUpdate 전달값
+      tripRef.current.completedAt ||         // 3순위: onUpdate에 저장된 값
+      now.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    const finalTimestamp = arrivalData?.arrivalTimestamp || tripRef.current.arrivalTimestamp || now.getTime();
+    
+    console.log(`🏁 [도착시각] ref=${arrivalTimeRef.current}, completedAtStr=${arrivalData?.completedAtStr}, trip.completedAt=${tripRef.current.completedAt}, 최종=${finalCompletedAt}`);
+    
+    // [Fix] 도착 트리거 발생 시각을 state에 저장 → 모달이 new Date()로 폴백하지 않도록
+    setArrivalCompletedAt(finalCompletedAt);
+    
+    // [Fix] Set Deduction Amount for Modal Display - sentMessages 기반으로 정확히 계산
+    const sentMsgs = tripRef.current.sentMessages || [];
+    const sentDep = sentMsgs.includes('출발문자');
+    const rCount = tripRef.current.recipientCount || trip.recipientCount || 1;
+    let displayDeduction = 0;
+    if (tripRef.current.smsMode === 'kakao' || trip.smsMode === 'kakao') {
+      if (sentMsgs.length > 0) displayDeduction = (sentDep ? 100 : 50) * rCount;
+      else displayDeduction = 50 * rCount; // 최소 표시
+    } else {
+      if (sentMsgs.length > 0) displayDeduction = rCount >= 2 ? 100 : 50;
+      else displayDeduction = rCount >= 2 ? 100 : 50;
+    }
+    setFinalDeduction(displayDeduction);
+
+    console.log(`🏁 [Smart Logic] 운행 완료 모달 표시 (도착시각: ${finalCompletedAt})`);
+    
+    // [Fix 도착시각] onUpdate 시점에 상태값들이 확실히 반영된 객체 전달
+    onUpdate({ 
+      ...tripRef.current, 
+      status: 'completed',
+      completedAt: finalCompletedAt,
+      arrivalTimestamp: finalTimestamp,
+      sentMessages: sentMsgs // 최신 발송 내역 보존
+    });
+
+    setIsCompletionModalOpen(true);
+    if (onStatusChange) onStatusChange('completed');
+  };
+
+  /**
+   * [V_FIX] 중도 취소 및 최종 완료 시 모두 사용되는 통합 결제 로직
+   * @param isCancelled 사용자가 운행 도중 강제로 취소한 경우인지 여부
+   */
+  const processPayment = async (isCancelled: boolean = false) => {
+    // [Fix] isFinishedRef가 아닌 isPaymentProcessedRef로 중복 결제 방지
+    // (isFinishedRef는 모달 표시 시 true가 되어 processPayment를 막아버리는 버그가 있었음)
+    if (isPaymentProcessedRef.current) {
+      console.log('💰 [결제] 이미 처리 완료 - 중복 실행 무시');
+      return;
+    }
+    isPaymentProcessedRef.current = true;
+    
+    const context = isCancelled ? "[중도취소]" : "[완료]";
+    console.log(`💰 ${context} 결제 정산 시작...`);
+
+    try {
+      if (typeof deductPoints === 'function') {
+        const recipientCount = tripRef.current.recipientCount || 1;
+        
+        // [V_FIX] 결제 직전 Native로부터 최종 발송 내역 강제 동기화 (레이스 컨디션 방지)
+        let sentMessages = tripRef.current.sentMessages || [];
+        try {
+          const { TripNotification } = await import('../plugins/TripNotificationPlugin');
+          // @ts-ignore
+          const currentState = await TripNotification.checkCurrentStatus();
+          const nativeSentStr = currentState?.sentMessages || "";
+          const nativeSentArray = nativeSentStr.split(',').filter((s: string) => s.length > 0);
+          
+          if (nativeSentArray.length > 0) {
+            console.log("💰 [결제] Native 최종 동기화 완료:", nativeSentArray);
+            sentMessages = nativeSentArray;
+            // tripRef.current도 함께 동기화하여 onComplete로 넘겨줌
+            tripRef.current.sentMessages = nativeSentArray;
+          }
+        } catch (e) {
+          console.warn("💰 [결제] Native 동기화 실패 (기존 데이터 사용):", e);
+        }
+
+        const hasSentSomething = sentMessages.length > 0;
+        
+        let deduction = 0;
+
+        if (tripRef.current.smsMode === 'kakao') {
+          if (hasSentSomething) {
+            // 카카오 알림톡: 
+            // 1) 출발 ON + (경유/도착 중 최소 1회 발송) = 1인 100P
+            // 2) 출발 OFF + (경유/도착 중 최소 1회 발송) = 1인 50P
+            const sentDeparture = sentMessages.includes('출발문자');
+            const perPerson = sentDeparture ? 100 : 50;
+            deduction = perPerson * recipientCount;
+          }
+        } else {
+          // 일반문자: 1인 50P, 2인 이상 100P (고정)
+          if (hasSentSomething) {
+            deduction = recipientCount >= 2 ? 100 : 50;
+          }
+        }
+
+        if (deduction > 0) {
+          const origin = tripRef.current.startPoint || '출발지';
+          const destination = tripRef.current.destination || '목적지';
+          deductPoints(deduction, `${context} ${origin} → ${destination}`);
+          console.log(`💰 ${context} Billing Applied: ${deduction}P (mode: ${tripRef.current.smsMode}, recipients: ${recipientCount}, tags: ${sentMessages.join(',')})`);
+        } else {
+          console.log(`💰 ${context} No messages sent. Skipping billing.`);
+        }
+      }
+    } catch (e) {
+      console.error(`❌ ${context} Failed to deduct points`, e);
+    }
+  };
+
+  const handleManualExit = async () => {
+    console.log("👋 [User Confirm] 사용자가 운행 완료 확인 클릭");
+
+    // 1. 포인트 차감 정산 (최종)
+    await processPayment(false);
+
+    // 모달 닫기
+    setIsCompletionModalOpen(false);
+
+    // 2. Stop Native Service
+    try {
+      await TripNotification.stopNotification();
+      console.log("✅ Native Service Stopped");
+    } catch (e) { console.error("Failed to stop service", e); }
+
+    // 3. Clear Local State & Logs — 새 예약이 가능하도록 완전 정리
+    localStorage.removeItem('trip_active');
+    localStorage.removeItem('trip_completed');
+    localStorage.removeItem(`trip_completed_${trip.id}`);
+    localStorage.removeItem(`sms_sent_${trip.id}`);
+    localStorage.removeItem(`waypoint_sms_sent_${trip.id}`);
+    console.log("🧹 [Complete] localStorage 완전 정리 완료");
+    try { await TripNotification.clearLogs(); } catch (e) { }
+
+    // 4. Notify Parent to Switch Screen - tripRef.current 최신 데이터 전달 (sentMessages, completedAt 포함)
+    console.log("🏠 [Complete] 홈 화면으로 이동. sentMessages:", tripRef.current.sentMessages);
+    onComplete(tripRef.current);
+  };
+
+  // --- Logic: Listen for Service Updates ---
+  useEffect(() => {
+    console.log("🟢 [v25] NavigationActive: SCREEN MOUNTED");
+
+    let locationListenerHandle: any;
+    let stateListenerHandle: any;
+
+    const setupListener = async () => {
+      const { TripNotification } = await import('../plugins/TripNotificationPlugin');
+
+      try {
+        // @ts-ignore
+        const currentState = await TripNotification.checkCurrentStatus();
+        console.log("[v19] Current service state:", currentState);
+
+        if (currentState && currentState.isActive !== undefined) {
+          // Sync UI with service state
+          
+          // [V_FIX] Native에서 관리하는 발송 내역(sentMessages) 복구 및 동기화
+          // Native는 쉼표로 구분된 문자열("출발문자,경유지,도착문자")을 반환함
+          const nativeSentStr = currentState.sentMessages || "";
+          const nativeSentArray = nativeSentStr.split(',').filter((s: string) => s.length > 0);
+          
+          if (nativeSentArray.length > 0) {
+            console.log("📋 [V_FIX] Native로부터 발송 내역 복구:", nativeSentArray);
+            tripRef.current = {
+                ...tripRef.current,
+                sentMessages: nativeSentArray
+            };
+            onUpdate(tripRef.current);
+          }
+
+          if (currentState.distanceMeters > 0) {
+            setCurrentDistance(currentState.distanceMeters);
+          }
+          if (currentState.timeMinutes > 0) {
+            setCurrentTime(currentState.timeMinutes);
+          }
+          if (currentState.status === 'completed') {
+            handleTripCompletion(false, {
+              completedAtStr: currentState.completedAtStr,
+              arrivalTimestamp: currentState.arrivalTimestamp
+            });
+          } else if (currentState.status === 'active') {
+            setNavigationStatus('active');
+          } else if (currentState.status === 'waiting') {
+            setNavigationStatus('waiting');
+          }
+        }
+      } catch (e) {
+        console.error("[v19] Failed to query service state:", e);
+      }
+
+      // @ts-ignore
+      locationListenerHandle = await TripNotification.addListener('tripLocationUpdate', (data: any) => {
+        if (!data) return;
+
+        if (data.timeMin !== undefined) setCurrentTime(data.timeMin);
+        if (data.distMeters !== undefined) setCurrentDistance(data.distMeters);
+        if (data.progress !== undefined) setCurrentProgress(data.progress); // [v59] Sync Progress
+
+        if (data.status === 'waiting') {
+          if (navigationStatus !== 'waiting') setNavigationStatus('waiting');
+          setCurrentProgress(0);
+        }
+        if (data.status === 'active') {
+          if (navigationStatus !== 'active') setNavigationStatus('active');
+          if (data.progress !== undefined) setCurrentProgress(data.progress * 100);
+        }
+        else if (data.status === 'completed' || data.distMeters < 50) {
+          // Native reports completed or very close
+          if (navigationStatus !== 'completed' && !isFinishedRef.current) {
+            console.log('🏁 Completion via location update (Distance < 50m)');
+            handleTripCompletion(false);
+          }
+        }
+        
+        if (data.status === 'active' && !departureNotificationSentRef.current) {
+          departureNotificationSentRef.current = true;
+          onUpdate({ ...tripRef.current, status: 'active' });
+        }
+
+        // Persist Data (완료 전까지만 갱신)
+        if (!isFinishedRef.current && data.timeMin >= 0 && data.distMeters >= 0) {
+          onUpdate({
+            ...tripRef.current,
+            estimatedTime: data.timeMin,
+            estimatedDistance: data.distMeters,
+            status: data.status === 'active' ? 'active' : tripRef.current.status
+          });
+        }
+      });
+
+      console.log("DEBUG_v18: [NavigationActive] tripLocationUpdate listener registered");
+
+      // ✅ NEW: Listen for 'completed' state
+      stateListenerHandle = await TripNotification.addListener('tripStateUpdate', (state: any) => {
+        console.log("DEBUG_v18: [NavigationActive→JS] tripStateUpdate received:", state);
+
+        if (state.status === 'completed' && !isFinishedRef.current) {
+          console.log('✅ Trip completed by native service broadcast - Triggering UI Modal');
+            
+          setNavigationStatus('completed');
+          setCurrentProgress(100);
+          
+          // 네이티브에서 전달된 시간 정보 사용
+          const completedAtStr = state.completedAtStr;
+          const arrivalTimestamp = state.arrivalTimestamp;
+          
+          // handleTripCompletion 내부에서 onUpdate를 처리하므로 중복 호출 제거
+          handleTripCompletion(false, {
+             completedAtStr,
+             arrivalTimestamp
+          });
+        }
+        else if (state.status === 'active') {
+          console.log("DEBUG_v18: [NavigationActive] Trip activated");
+          setNavigationStatus('active');
+          if (!departureNotificationSentRef.current) {
+            departureNotificationSentRef.current = true;
+            onUpdate({ ...tripRef.current, status: 'active' });
+          }
+        }
+      });
+      console.log("DEBUG_v18: [NavigationActive] tripStateUpdate listener registered");
+    };
+
+    setupListener();
+
+    // [V_FIX] Polling Fallback (Safety Net)
+    const pollingInterval = setInterval(async () => {
+      try {
+        const { TripNotification } = await import('../plugins/TripNotificationPlugin');
+        // @ts-ignore
+        const currentState = await TripNotification.checkCurrentStatus();
+        
+        if (currentState && currentState.status) {
+          if (currentState.status === 'completed' && !isFinishedRef.current) {
+            console.log("🏁 [Polling Fallback] Detected COMPLETED state. Force Triggering Modal.");
+            handleTripCompletion(false, {
+              completedAtStr: currentState.completedAtStr,
+              arrivalTimestamp: currentState.arrivalTimestamp
+            });
+          } else if (currentState.status === 'active') {
+             if (currentState.distanceMeters >= 0) setCurrentDistance(currentState.distanceMeters);
+             if (currentState.timeMinutes > 0) setCurrentTime(currentState.timeMinutes);
+             if (navigationStatus !== 'active') setNavigationStatus('active');
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }, 10000);
+
+    return () => {
+      console.log("DEBUG_v18: [NavigationActive] Cleaning up listeners & polling");
+      clearInterval(pollingInterval);
+      if (locationListenerHandle) {
+        locationListenerHandle.remove();
+      }
+      if (stateListenerHandle) {
+        stateListenerHandle.remove();
+      }
+    };
+  }, []);
+
+  // --- Logic: Main GPS & Notification Start ---
+  useEffect(() => {
+    let isEffectMounted = true;
+
+    const startBackgroundService = async () => {
+      // [Fix] Prevent double initialization
+      if (isInitializedRef.current) return;
+      isInitializedRef.current = true;
+
+      try {
+        if (Capacitor.getPlatform() === 'android') {
+          await LocalNotifications.requestPermissions();
+          if (STORE_CONFIG.SMS_PROVIDER === 'NATIVE') await LocalSms.requestPermission();
+          const perm = await LocalNotifications.checkPermissions();
+          if (perm.display !== 'granted') await LocalNotifications.requestPermissions();
+        }
+
+        const startNativeService = async () => {
+          try {
+            // @ts-ignore
+            const currentState = await TripNotification.checkCurrentStatus();
+            console.log("[v34] Initial Service State:", currentState);
+
+            if (currentState && currentState.status === 'completed') {
+              console.log("🏁 [Init] Found COMPLETED state in Native. Triggering Modal.");
+              handleTripCompletion(false);
+              setIsCheckingInitialStatus(false);
+              return;
+            }
+
+            setIsCheckingInitialStatus(false);
+
+            if (currentState && currentState.isActive) {
+              console.log('🚀 Service already running. Skipping initialization.');
+              return;
+            }
+
+            let startPointName = trip.startPoint || trip.departure;
+            let startLat = trip.startLat || 0;
+            let startLng = trip.startLng || 0;
+            let initialDistMeters = trip.estimatedDistance || 0;
+
+            try {
+              const currentPos = await Geolocation.getCurrentPosition();
+              startLat = currentPos.coords.latitude;
+              startLng = currentPos.coords.longitude;
+              const distKm = calculateDistance(startLat, startLng, trip.destinationLat || 0, trip.destinationLng || 0);
+              initialDistMeters = Math.floor(distKm * 1000);
+            } catch (gpsErr) {
+              console.warn('[Init] GPS 취득 실패, 기존 estimatedDistance 사용:', initialDistMeters);
+            }
+
+            // [Fix 2] 지번주소 감지 패턴 (예: "강남구 압구정동 529", "합정동 1-7")
+            const isJibunAddress = (addr: string) => /[가-힣]+(동|리)\s*\d+(-\d+)?$/.test(addr.trim());
+            const needsReverseGeocode = 
+              !startPointName || 
+              startPointName === '출발지' || 
+              startPointName === '현재 위치' ||
+              isJibunAddress(startPointName); // ← 구주소(지번)도 재조회
+
+            if (needsReverseGeocode) {
+              try {
+                const name = await reverseGeocodeKakao(startLat, startLng);
+                if (name) {
+                  console.log(`📍 [출발지] ${startPointName} → 신주소: ${name}`);
+                  startPointName = name;
+                  onUpdate({
+                    ...trip,
+                    startPoint: name,
+                    departure: name,
+                    startLat: trip.startLat || startLat,
+                    startLng: trip.startLng || startLng
+                  });
+                }
+              } catch (e) {
+                console.log('Failed to get start point info', e);
+              }
+            }
+
+            await TripNotification.startNotification({
+              tripData: {
+                id: trip.id,
+                destination: trip.destination,
+                recipient: trip.recipient || '',
+                apiKey: (import.meta as any).env.VITE_KAKAO_REST_API_KEY,
+                timeRemaining: Math.floor(trip.estimatedTime),
+                distance: initialDistMeters,
+                destLat: trip.destinationLat || 0,
+                destLng: trip.destinationLng || 0,
+                targetDistance: trip.targetDistance || 10,
+                startPoint: startPointName,
+                initialStatus: trip.status || 'waiting',
+                notifications: JSON.stringify(trip.notifications || []),
+                smsMode: trip.smsMode || 'sms_single',
+                senderName: (() => {
+                  try {
+                    const p = JSON.parse(localStorage.getItem('userProfile') || '{}');
+                    return p.name || '게스트';
+                  } catch { return '게스트'; }
+                })(),
+                triggerType: trip.triggerType || 'time',
+                triggerValue: trip.triggerValue,
+                waypointLng: trip.waypointLng,
+                waypoints: trip.waypoints,
+                enableDeparture: trip.enableDeparture ?? true,
+                supabaseUrl: (import.meta as any).env.VITE_SUPABASE_URL,
+                supabaseAnonKey: (import.meta as any).env.VITE_SUPABASE_ANON_KEY,
+                ...(() => {
+                  const KAKAO_DEFAULT = {
+                    departureMessage: `#{발송자}님이 목적지로 출발하였습니다. 도착 예정 시간에 맞춰 기다려 주세요.\n\n▶출발지:#{출발지}\n▶도착지:#{도착지}\n▶예상 소요시간:약 #{남은시간}분\n\n\n※수신자님의 [곧 도착해요]서비스 신청에 따른 단계별 알림입니다.`,
+                    waypointMessage:  `#{발송자}님이 운행중입니다. 도착 예정 시간에 맞춰 기다려 주세요.\n\n▶지금 [#{경유지}]를 지나고 있습니다. \n▶약 [#{남은시간}]분 후 도착합니다.\n\n\n※수신자님의 [곧 도착해요]서비스 신청에 따른 단계별 알림입니다.`,
+                    arrivalMessage:   `#{발송자}님이 목적지에 도착하였습니다. \n\n\n▶[#{도착지}]부근입니다.\n▶약 [#{남은시간}]분 후 도착합니다.\n\n\n※수신자님의 [곧 도착해요]서비스 신청에 따른 단계별 알림입니다.`,
+                    departureTitle: `[#{출발지}]출발`,
+                    waypointTitle:  `[#{경유지}]근처`,
+                    arrivalTitle:   `[#{도착지}]도착`
+                  };
+                  
+                  const SMS_DEFAULT = {
+                    departureMessage: '{출발지}에서 출발했습니다. 약 {남은시간}분 후 도착 예정입니다.',
+                    waypointMessage:  '{경유지}를 지나고 있습니다. 약 {남은시간}분 후 도착 예정입니다.',
+                    arrivalMessage:   '{도착지} 근처입니다. 곧 도착 예정입니다.'
+                  };
+
+                  if (trip.smsMode === 'kakao') return KAKAO_DEFAULT;
+
+                  const carPrefix = (trip.selectedCar) ? `차량번호 : ${trip.selectedCar}\n` : '';
+
+                  try {
+                    const saved = localStorage.getItem('sms_templates') || localStorage.getItem('message_templates');
+                    if (saved) {
+                      const t = JSON.parse(saved);
+                      return {
+                        departureMessage: carPrefix + (t.departure || SMS_DEFAULT.departureMessage),
+                        waypointMessage:  carPrefix + (t.waypoint  || SMS_DEFAULT.waypointMessage),
+                        arrivalMessage:   carPrefix + (t.arrival   || SMS_DEFAULT.arrivalMessage),
+                        departureTitle: '',
+                        waypointTitle: '',
+                        arrivalTitle: ''
+                      };
+                    }
+                  } catch (e) {
+                    console.warn('Failed to parse sms_templates', e);
+                  }
+
+                  return {
+                    departureMessage: carPrefix + SMS_DEFAULT.departureMessage,
+                    waypointMessage:  carPrefix + SMS_DEFAULT.waypointMessage,
+                    arrivalMessage:   carPrefix + SMS_DEFAULT.arrivalMessage,
+                    departureTitle: '',
+                    waypointTitle: '',
+                    arrivalTitle: ''
+                  };
+                })()
+              }
+            });
+          } catch (e) {
+            console.error('Failed to start native notification:', e);
+          }
+        };
+
+        startNativeService();
+
+        (TripNotification as any).addListener('tripStartAddressUpdated', async (data: any) => {
+          if (data && data.address) {
+            // [Fix 2] 네이티브 Geocoder는 구주소(지번)를 반환할 수 있음 → 카카오로 신주소 재조회
+            const rawAddress: string = data.address;
+            const hasLat = data.lat || tripRef.current.startLat;
+            const hasLng = data.lng || tripRef.current.startLng;
+            
+            if (hasLat && hasLng) {
+              try {
+                const roadAddress = await reverseGeocodeKakao(hasLat, hasLng);
+                const finalAddress = roadAddress || rawAddress;
+                console.log(`📍 [출발지] 네이티브=${rawAddress} → 카카오신주소=${finalAddress}`);
+                onUpdate({ ...tripRef.current, startPoint: finalAddress });
+              } catch {
+                onUpdate({ ...tripRef.current, startPoint: rawAddress });
+              }
+            } else {
+              onUpdate({ ...tripRef.current, startPoint: rawAddress });
+            }
+          }
+        });
+
+        TripNotification.addListener('tripNotificationSent', (info: any) => {
+          const type = info.type || 'arrival'; 
+          (async () => {
+            const tag = type === 'departure' ? '출발문자' : 
+                        type === 'arrival' ? '도착문자' : 
+                        (info.waypointName || '경유지');
+            
+            const currentSent = tripRef.current.sentMessages || [];
+            if (!currentSent.includes(tag)) {
+              const updatedSent = [...currentSent, tag];
+              const arrivalData: Partial<Trip> = {};
+              if (type === 'arrival') {
+                // [Fix 1] 도착 시각을 ref에 즉시 캡처 → handleTripCompletion이 나중에 호출돼도 정확한 시각 사용
+                const arrivedAt = info.arrivedAt ? new Date(info.arrivedAt) : new Date();
+                const formattedAt = arrivedAt.toLocaleString('ko-KR', {
+                  year: 'numeric', month: '2-digit', day: '2-digit',
+                  hour: '2-digit', minute: '2-digit', hour12: false
+                });
+                arrivalData.completedAt = formattedAt;
+                arrivalData.arrivalTimestamp = arrivedAt.getTime();
+                arrivalTimeRef.current = formattedAt; // ← 핵심: ref에도 즉시 저장
+                console.log(`🏁 [도착시각] 캡처 완료: arrivedAt=${info.arrivedAt} → ${formattedAt}`);
+              }
+
+              // [Fix sentMessages] tripRef.current를 직접 업데이트해야 다음 이벤트에서 누적이 올바르게 동작
+              // 이전: onUpdate만 호출 → tripRef는 초기값 유지 → arrival이 departure를 덮어씀 → sentMessages 부정확
+              // 이후: tripRef.current 먼저 업데이트 → processPayment가 정확한 sentMessages 읽음 → 올바른 차감액
+              tripRef.current = {
+                ...tripRef.current,
+                sentMessages: updatedSent,
+                ...arrivalData
+              };
+              console.log(`📋 [sentMessages 업데이트] ${updatedSent.join(', ')}`);
+
+              onUpdate(tripRef.current);
+            }
+
+            if (tripRef.current.smsMode === 'kakao') {
+              // [Fix 중복발송] 네이티브가 직접 올톡 발송한 경우 JS 재발송 스킵 (ERR_280 방지)
+              if (info.kakaoSentNative === true) {
+                console.log(`[올톡] 네이티브 직접 발송 완료. JS 중복 발송 스킵 (type=${type})`);
+              } else {
+              try {
+                const { supabase } = await import('../lib/supabaseClient');
+                // [Fix] 올톡 템플릿 변수(var1~var4) + title 함께 전달 (title 누락 시 ERR_280 발생)
+                const body: Record<string, string> = {
+                  recipient: info.recipient, 
+                  message: info.message || info.msg || '',
+                  type: info.type || type,
+                  var1: info.var1 || info.senderName || '',
+                  var2: info.var2 || '',
+                  // [Fix 3] 도착 알림은 남은 시간이 의미 없음 → '0'으로 강제 (네이티브가 마지막 캐시값 보낼 수 있음)
+                  var3: type === 'arrival' ? '0' : (info.var3 || ''),
+                };
+                if (info.var4) body.var4 = info.var4;
+                // [Fix ERR_280] title 강조 표기형 템플릿에 title 필수 전달
+                if (info.title) {
+                  body.title = info.title;
+                } else {
+                  const defaultTitles: Record<string, string> = {
+                    // [Fix KKO_3016] 올톡 등록 템플릿 title과 정확히 일치해야 함
+                    departure: `[${info.var2 || '출발지'}] 출발`,   // 11091: [#{VAR2}] 출발 (공백!)
+                    waypoint:  `[${info.var2 || '경유지'}]근처`,    // 11092: [#{VAR2}]근처
+                    arrival:   `[${info.var2 || '도착지'}]부근`,    // 11093: [#{VAR2}]부근 (도착 아님!)
+                  };
+                  body.title = defaultTitles[type] || '';
+                }
+                console.log(`[올톡 호출] type=${type}, title=${body.title}, var1=${body.var1}, var2=${body.var2}, var3=${body.var3}`);
+                await supabase.functions.invoke('send-kakao-alimtalk', { body });
+              } catch (e) {
+                console.error('❌ Failed to send Kakao Alimtalk:', e);
+              }
+              }
+            }
+          })();
+        });
+
+        const startTracking = async (useHighAccuracy = true) => {
+          try {
+            const permission = await Geolocation.checkPermissions();
+            if (permission.location !== 'granted') await Geolocation.requestPermissions();
+
+            const id = await Geolocation.watchPosition(
+              { enableHighAccuracy: useHighAccuracy, timeout: 10000, maximumAge: 0 },
+              (position, err) => {
+                if (err) {
+                  if (useHighAccuracy) {
+                    if (watchId.current !== null) Geolocation.clearWatch({ id: watchId.current });
+                    if (isEffectMounted) startTracking(false);
+                  }
+                  return;
+                }
+                if (position) {
+                  setStatus('active');
+                }
+              }
+            );
+
+            if (!isEffectMounted) {
+              Geolocation.clearWatch({ id });
+              return;
+            }
+            watchId.current = id;
+          } catch (e: any) {
+            if (isEffectMounted) setStatus('error');
+          }
+        };
+
+        if (navigator.geolocation || Geolocation) startTracking(true);
+        else setStatus('error');
+      } catch (e) {
+        console.error('Error starting services:', e);
+      }
+    };
+
+    startBackgroundService();
+
+    return () => {
+      isEffectMounted = false;
+      if (watchId.current !== null) Geolocation.clearWatch({ id: watchId.current });
+    };
+  }, []); 
+
+  // --- Handlers ---
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+
+  const handleEditTrip = async () => {
+    setIsEditDialogOpen(true);
+  };
+
+  // Removed handleConfirmManualSend as it is no longer used
+
+  // State/Refs for Smart Logic
+  const isFinishedRef = useRef(false);    // Track if trip completion has been triggered
+
+  // ... (existing logs) ...
+
+  const handleCancelTrip = async () => {
+    console.log("🚫 [Cancel] 예약 취소 시작");
+
+    // [V_FIX] 취소 전 결제 확인 (이미 발송된 문자 차감)
+    await processPayment(true);
+
+    // 위치 추적 중지
+    if (watchId.current !== null) await Geolocation.clearWatch({ id: watchId.current });
+
+    // [Fix] 서비스 중지 (알림 즉시 제거 포함)
+    try {
+      await TripNotification.stopNotification();
+      console.log("✅ [Cancel] Service stopped");
+    } catch (e) {
+      console.error("❌ [Cancel] Failed to stop notification service:", e);
+    }
+
+    // [Fix] localStorage 완전 정리
+    const smsKey = `sms_sent_${trip.id}`;
+    const completedKey = `trip_completed_${trip.id}`;
+    localStorage.removeItem(smsKey);
+    localStorage.removeItem(completedKey);
+    console.log("🧹 [Cancel] localStorage 정리 완료");
+
+    // 로그 정리
+    try {
+      await TripNotification.clearLogs();
+    } catch (e) {
+      console.error("Failed to clear logs:", e);
+    }
+
+    onCancel();
+  };
+
+
+  // [V27] Ghost SMS Fix: Check on Mount
+  useEffect(() => {
+    const smsKey = `sms_sent_${trip.id}`;
+    if (localStorage.getItem(smsKey)) {
+      console.log("👻 [Ghost Fix] Found sent flag on mount. Showing Modal.");
+      setFinalDeduction(50); // Assumption: If sent, fee was paid
+      isFinishedRef.current = true; // Lock logic
+      setIsCompletionModalOpen(true);
+    }
+  }, []);
+
+  // --- Logic: Listen for Service Updates ---
+
+
+  /* ... */
+
+  // --- Logic: Main GPS & Notification Start ---
+
+  if (isCheckingInitialStatus) {
+    return (
+      <div className="flex flex-col w-full h-full bg-[#111111] items-center justify-center relative">
+        <Loader2 className="w-8 h-8 text-[#00FF88] animate-spin" />
+        <p className="mt-4 text-gray-400 text-sm">운행 상태를 확인하고 있습니다...</p>
+      </div>
+    );
+  }
+
+  if (isCompletionModalOpen) {
+    return (
+      <TripCompletionModal
+        isOpen={isCompletionModalOpen}
+        trip={trip}
+        pointsDeducted={finalDeduction}
+        completedAtStr={arrivalCompletedAt}
+        onConfirm={handleManualExit}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-[#111111] text-white">
+      {/* 1. Header: Back + Title + Settings */}
+      <header className="px-5 pt-[calc(1.5rem+env(safe-area-inset-top,1.5rem))] pb-4 flex justify-between items-center border-b border-[#222222]">
+        <button onClick={() => onNavigate('home')} className="p-2 -ml-2 text-gray-400 hover:text-white">
+          <Navigation className="w-6 h-6 rotate-180" /> {/* Back Arrow styling */}
+        </button>
+        <span className="text-lg font-bold">운행 현황</span>
+        <button onClick={() => setIsLogViewerOpen(true)} className="p-2 -mr-2 text-gray-400 hover:text-white">
+          <span className="text-xs font-mono border border-gray-600 rounded px-1.5 py-0.5">LOG</span>
+        </button>
+      </header>
+
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide py-4 px-5 space-y-4">
+
+        {/* 2. Route Card (Start -> End) */}
+        <div className="bg-[#1C1C1E] rounded-2xl p-5 border border-[#2C2C2E] shadow-lg relative overflow-hidden">
+          <div className="flex flex-col gap-8 relative z-10">
+            {/* Start */}
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col items-center gap-1 mt-1">
+                <div className="w-4 h-4 rounded-full border-[3px] border-[#00FF88] shadow-[0_0_10px_#00FF8866]" />
+                <div className="w-0.5 h-12 bg-gradient-to-b from-[#00FF88] to-gray-700 dashed-line-vertical" />
+              </div>
+              <div>
+                <div className="text-xs text-[#00FF88] font-bold mb-0.5">출발지</div>
+                <div className="text-lg font-bold text-white leading-tight">{trip.startPoint || '현재 위치'}</div>
+              </div>
+            </div>
+
+            {/* End */}
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col items-center gap-1 -mt-2">
+                <div className="w-0.5 h-full" />
+                <MapPin className="w-5 h-5 text-[#FF3B30] fill-[#FF3B30]/20" />
+              </div>
+              <div className="-mt-1">
+                <div className="text-xs text-[#FF3B30] font-bold mb-0.5">도착지</div>
+                <div className="text-lg font-bold text-white leading-tight">{trip.destination}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Progress Bar Component (Reusing Existing) */}
+          <div className="mt-6">
+            <div className="flex justify-between items-end mb-2">
+              <span className="text-sm text-gray-400 font-medium">운행 진행 상황</span>
+              <span className="text-sm font-bold text-[#00FF88]">{Math.round(displayProgress)}% 완료</span>
+            </div>
+            <ProgressSteps
+              status={navigationStatus}
+              distance={currentDistance}
+              totalDistance={trip.estimatedDistance || 0}
+              waypointsStr={trip.waypoints}
+              nativeProgress={displayProgress / 100}
+              startLat={trip.startLat}
+              startLng={trip.startLng}
+            />
+          </div>
+        </div>
+
+        {/* 3. Info Grid (Time / Distance) */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-[#1C1C1E] rounded-2xl p-5 border border-[#2C2C2E] flex flex-col justify-center items-center h-32 relative overflow-hidden">
+            <div className="text-xs text-gray-500 mb-1">남은 시간</div>
+            <div className="text-4xl font-bold text-[#00FF88] tracking-tight">
+              {Math.floor(currentTime)}<span className="text-lg ml-1 font-medium text-[#00FF88]/70">분</span>
+            </div>
+            <div className="absolute -bottom-6 -right-6 w-24 h-24 bg-[#00FF88]/5 rounded-full blur-xl" />
+          </div>
+          <div className="bg-[#1C1C1E] rounded-2xl p-5 border border-[#2C2C2E] flex flex-col justify-center items-center h-32 relative overflow-hidden">
+            <div className="text-xs text-gray-500 mb-1">남은 거리</div>
+            <div className="text-4xl font-bold text-white tracking-tight">
+              {(currentDistance / 1000).toFixed(1)}<span className="text-lg ml-1 font-medium text-gray-500">km</span>
+            </div>
+            <div className="absolute -bottom-6 -right-6 w-24 h-24 bg-white/5 rounded-full blur-xl" />
+          </div>
+        </div>
+
+
+        {/* 4. Status Information Card (Replacing Map) */}
+        <div className="rounded-2xl border border-[#2C2C2E] bg-[#1C1C1E] p-6 flex items-center gap-5 shadow-inner">
+          <div className="relative">
+            <div className={`w-4 h-4 rounded-full ${navigationStatus === 'active' ? 'bg-[#00FF88]' : 'bg-yellow-400'} shadow-[0_0_15px_rgba(0,255,136,0.3)]`} />
+            <div className={`absolute -inset-1 rounded-full animate-ping opacity-20 ${navigationStatus === 'active' ? 'bg-[#00FF88]' : 'bg-yellow-400'}`} />
+          </div>
+          <div className="flex-1">
+            <div className="text-lg font-bold text-white mb-1">
+              {navigationStatus === 'waiting' ? '출발 대기 중' : navigationStatus === 'active' ? '정상 운행 중' : '운행 종료'}
+            </div>
+            <div className="text-sm text-gray-400 leading-relaxed">
+              {navigationStatus === 'waiting'
+                ? '출발지를 이탈하면 자동으로 운행이 시작됩니다.'
+                : navigationStatus === 'active' 
+                ? '실시간 위치를 기반으로 경유지 및 도착 알림을 전송하고 있습니다.'
+                : '운행이 성공적으로 완료되었습니다.'}
+            </div>
+            {/* [Disclaimer] 네비게이션이 아님을 고지하는 사용자 안내문 추가 */}
+            <div className="text-xs text-yellow-500/90 font-medium mt-3 border-t border-gray-800 pt-3 flex items-center gap-1.5 leading-relaxed">
+              ⚠️ 이 앱은 네비게이션이 아닙니다. 예약 문자 보낼 때는 정확합니다.
+            </div>
+          </div>
+        </div>
+
+
+        {/* 5. Reservation Summary Card */}
+        <div className="bg-[#1C1C1E] rounded-2xl p-6 border border-[#2C2C2E]">
+          <div className="flex justify-between items-center mb-6">
+            <span className="text-sm font-bold text-gray-300">예약 정보 요약</span>
+            {/* [User Request] Badge Removed */}
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">예약 시간</span>
+              <span className="text-sm font-bold text-white">
+                {trip.createdAt
+                  ? new Date(trip.createdAt).toLocaleString('ko-KR', {
+                      year: 'numeric', month: '2-digit', day: '2-digit',
+                      hour: '2-digit', minute: '2-digit', hour12: false
+                    })
+                  : new Date().toLocaleString('ko-KR', {
+                      year: 'numeric', month: '2-digit', day: '2-digit',
+                      hour: '2-digit', minute: '2-digit', hour12: false
+                    })
+                }
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">받는 사람</span>
+              <span className="text-sm font-bold text-white">{formatRecipientDisplay(trip.recipient)}</span>
+            </div>
+
+            <div className="pt-2 border-t border-[#2C2C2E]">
+              <div className="text-xs text-gray-500 mb-2">예약 메시지</div> {/* [User Request] Label Added */}
+              <div className="flex flex-wrap gap-2">
+                {/* Dynamic Tags */}
+                {trip.enableDeparture && (
+                  <span className="px-3 py-1 bg-[#00FF88]/10 text-[#00FF88] text-xs font-bold rounded-full border border-[#00FF88]/20">
+                    출발알림
+                  </span>
+                )}
+                {trip.triggerType === 'waypoint' && trip.waypoints && (() => {
+                  try {
+                    const parsed = JSON.parse(trip.waypoints);
+                    const arr = Array.isArray(parsed) ? parsed : [];
+                    return arr.map((wp: any, idx: number) => (
+                      <span key={idx} className="px-3 py-1 bg-[#00FF88]/10 text-[#00FF88] text-xs font-bold rounded-full border border-[#00FF88]/20">
+                        {wp.name || `경유지${idx + 1}`}
+                      </span>
+                    ));
+                  } catch { return null; }
+                })()}
+                {(!trip.waypoints || trip.triggerType !== 'waypoint') && (
+                  <span className="px-3 py-1 bg-[#00FF88]/10 text-[#00FF88] text-xs font-bold rounded-full border border-[#00FF88]/20">
+                    {trip.triggerValue}분 전
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Note/Request (Static for now in mock) */}
+          </div>
+        </div>
+
+        {/* Bottom Padding for scroll */}
+        <div className="h-48" />
+      </div>
+
+      {/* 6. Fixed Bottom Actions */}
+      <div className="fixed bottom-0 left-0 right-0 px-5 pt-5 pb-[calc(1.5rem+env(safe-area-inset-bottom,1.5rem))] bg-[#111111]/95 backdrop-blur-xl border-t border-[#222222] flex flex-col gap-3 z-50">
+        <Button
+          onClick={handleEditTrip}
+          className="w-full h-14 bg-blue-500 hover:bg-blue-400 text-white text-lg font-bold rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98]"
+        >
+          <span className="text-xl">✏️</span> 예약 수정
+        </Button>
+        <button
+          onClick={() => setIsCancelDialogOpen(true)}
+          className="w-full py-3 text-[#FF3B30] text-sm font-medium hover:bg-[#FF3B30]/10 rounded-xl transition-colors"
+        >
+          예약 취소
+        </button>
+      </div>
+
+      {/* Dialogs Reuse */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="bg-[#1C1C1E] border-[#2C2C2E] text-white">
+          <DialogHeader><DialogTitle className="text-white">예약 수정</DialogTitle></DialogHeader>
+          <div className="py-4 text-center text-gray-400">현재 운행을 취소하고<br />예약을 수정하시겠습니까?</div>
+          <div className="flex gap-3">
+            <Button onClick={() => setIsEditDialogOpen(false)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white border-none">돌아가기</Button>
+            <Button onClick={async () => { 
+              setIsEditDialogOpen(false); 
+              await processPayment(true); // 수정 시에도 발송분 차감
+              if (onEdit) onEdit(trip); 
+            }} className="flex-1 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border-blue-500/20">수정하기</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+        <DialogContent className="bg-[#1C1C1E] border-[#2C2C2E] text-white">
+          <DialogHeader><DialogTitle className="text-white">예약 취소</DialogTitle></DialogHeader>
+          <div className="py-4 text-center text-gray-400">정말로 예약을 취소하시겠습니까?<br />알림이 더 이상 전송되지 않습니다.</div>
+          <div className="flex gap-3">
+            <Button onClick={() => setIsCancelDialogOpen(false)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white border-none">돌아가기</Button>
+            <Button onClick={handleCancelTrip} className="flex-1 bg-red-500/10 text-red-500 hover:bg-red-500/20 border-red-500/20">취소하기</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* ... Other Dialogs ... */}
+      <Dialog open={isCancelCompleteDialogOpen} onOpenChange={setIsCancelCompleteDialogOpen}>
+        <DialogContent className="bg-[#1C1C1E] border-[#2C2C2E] text-white">
+          <div className="py-8 text-center text-lg font-bold">취소가 완료되었습니다.</div>
+          <Button onClick={() => { setIsCancelCompleteDialogOpen(false); onNavigate('home'); }} className="w-full bg-[#00FF88] text-[#111111] hover:bg-[#00E379]">확인</Button>
+        </DialogContent>
+      </Dialog>
+      <TripCompletionModal
+        isOpen={isCompleteDialogOpen}
+        trip={tripRef.current}
+        pointsDeducted={finalDeduction}
+        completedAtStr={arrivalCompletedAt}
+        onConfirm={() => {
+          setIsCompleteDialogOpen(false);
+          onComplete(tripRef.current);
+        }}
+      />
+      {/* Messages */}
+      {/* Toast removed */}
+      <TripLogViewer isOpen={isLogViewerOpen} onClose={() => setIsLogViewerOpen(false)} />
+      <AlertModal isOpen={alertState.open} onClose={() => setAlertState({ ...alertState, open: false })} message={alertState.message} />
+    </div>
+  );
+}

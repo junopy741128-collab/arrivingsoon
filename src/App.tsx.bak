@@ -1,0 +1,1120 @@
+import { supabase } from './lib/supabaseClient';
+// V17-FORCE-UPDATE-0207
+import { useState, useEffect } from 'react';
+import { Home, Plus, History, User } from 'lucide-react';
+import { LogoutModal } from './components/LogoutModal'; // Added import
+
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { Geolocation } from '@capacitor/geolocation'; // Added for permissions
+import { IntroPage } from './components/IntroPage';
+import { HomePage } from './components/HomePage';
+import { NotificationSetup } from './components/NotificationSetup';
+import { NavigationActive } from './components/NavigationActive';
+import { NotificationList } from './components/NotificationList';
+import { Settings } from './components/Settings';
+import { ContactManagement } from './components/ContactManagement';
+import { SnsLogin } from './components/SnsLogin';
+import { ProfileEdit } from './components/ProfileEdit';
+import { MyPage } from './components/MyPage';
+import { FavoriteTrips } from './components/FavoriteTrips';
+import { AdminPage } from './components/AdminPage';
+import { MessageManagement } from './components/MessageManagement';
+import { ThemeSelector } from './components/ThemeSelector';
+import { EmailLogin } from './components/EmailLogin';
+import { EmailSignup } from './components/EmailSignup';
+import { LoadingScreen } from './components/LoadingScreen';
+import { type Theme } from './utils/theme';
+import { createClient } from './utils/supabase/client';
+import { setAuthToken } from './utils/api';
+import { handlePointTransaction } from './lib/supabaseUtils';
+// [V23] Permission Guide
+import { PermissionGuide } from './components/PermissionGuide';
+
+export type Contact = {
+    id: string;
+    name: string;
+    phone: string;
+    phoneNumber?: string;
+    isFavorite: boolean;
+    type: 'phone' | 'kakao';
+    group?: string;
+    groups: string[];
+};
+
+export type NavigationInfo = {
+    app: string;
+    departure: string;
+    destination: string;
+    distance: number;
+    estimatedTime: number;
+    startLat?: number;
+    startLng?: number;
+    destLat?: number;
+    destLng?: number;
+};
+
+export type SetupFormData = {
+    departure: string;
+    destination: string;
+    enableDeparture: boolean;
+    enableArrival: boolean;
+    recipient: string;
+    departureCondition: number;
+    departureMessage: string;
+    arrivalCondition: number;
+    arrivalMessage: string;
+    navigationInfo: NavigationInfo | null;
+    targetDistance?: number;
+    selectedDestinationForNav: any | null;
+    triggerLocations?: { lat: number, lng: number, name: string, address: string }[]; // [V36] Added support for saved waypoints
+};
+
+export type Notification = {
+    id: string;
+    type: 'departure' | 'arrival';
+    condition: {
+        type: 'time' | 'distance';
+        value: number;
+        unit: '분' | 'km';
+    };
+    message: string;
+    recipient: string;
+    status: 'pending' | 'sent' | 'failed';
+};
+
+export type PointHistory = {
+    id: number;
+    type: 'earned' | 'used';
+    amount: number;
+    description: string;
+    date: string;
+    balance: number;
+};
+
+export type Trip = {
+    id: string;
+    departure: string;
+    destination: string;
+    notifications: Notification[];
+    status: 'planning' | 'active' | 'completed' | 'cancelled';
+    estimatedTime: number;
+    estimatedDistance: number;
+    recipient?: string;
+    createdAt?: string;
+    startLat?: number;
+    startLng?: number;
+    destinationLat?: number;
+    destinationLng?: number;
+    startTime?: number;
+
+    targetDistance?: number;
+    isFavorite?: boolean;
+    alias?: string;
+    enableDeparture?: boolean; // [V36] Added support for departure toggle
+
+    triggerType?: 'time' | 'distance' | 'waypoint';
+    triggerValue?: number | string;
+    waypointLat?: number;
+    waypointLng?: number;
+    waypointName?: string;
+    recipientName?: string;
+    waypoints?: string;
+    startPoint?: string;
+    initialStatus?: 'waiting' | 'active';
+};
+
+export type UserProfile = {
+    name: string;
+    email: string;
+    phone: string;
+    points: number;
+    pointHistory?: PointHistory[];
+};
+
+export type Screen = 'intro' | 'home' | 'setup' | 'active' | 'list' | 'settings' | 'contacts' | 'contactsManage' | 'favorites' | 'login' | 'profile' | 'messages' | 'theme' | 'emailLogin' | 'emailSignup' | 'mypage' | 'admin';
+
+
+const App: React.FC = () => {
+    // [v46] Admin email constant
+    const ADMIN_EMAIL = 'junopy741128@gmail.com';
+
+    // [V23] Permission State
+    const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+    // [V26] Logout Modal State
+    const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+    const [currentScreen, setCurrentScreen] = useState<Screen>(() => {
+        const saved = localStorage.getItem('currentScreen');
+        console.log('💾 [App.tsx] 초기 Screen 로드:', saved || 'home');
+        // 'intro' should not be restored blindly if logged in, but the useEffect will handle redirection
+        return (saved as Screen) || 'home';
+    });
+    const [currentTheme, setCurrentTheme] = useState<Theme>('dark');
+    const [isLoading, setIsLoading] = useState(true); // [V14] UI Loading State
+    const [isLoadingData, setIsLoadingData] = useState(true); // [V46] Data Loading State (for Restart Recovery)
+    const [isFavoritesSelectionMode, setIsFavoritesSelectionMode] = useState(false); // [V36] Favorites Selection Mode
+
+    // [V46] Data Initialization - Prevent Premature Redirects
+    useEffect(() => {
+        const initializeApp = async () => {
+            // Simulate or await actual data restoration if needed
+            // currently localStorage is sync, but we want to ensure everything is settled
+            // before allowing redirects.
+            await new Promise(resolve => setTimeout(resolve, 500));
+            setIsLoadingData(false);
+            console.log('✅ [App.tsx] Data Initialization Complete');
+        };
+        initializeApp();
+    }, []);
+
+    // [V23] Check Permissions on Mount
+    useEffect(() => {
+        const checkPermissions = async () => {
+            if (Capacitor.getPlatform() !== 'android') return;
+            try {
+                const loc = await Geolocation.checkPermissions();
+                if (loc.location !== 'granted') {
+                    console.log('[App] Location permission missing, showing guide');
+                    setShowPermissionGuide(true);
+                }
+            } catch (e) {
+                console.error('[App] Permission check failed', e);
+            }
+        };
+        checkPermissions();
+    }, []);
+
+    // [V28] Handle Deep Links (OAuth Callback)
+    useEffect(() => {
+        CapApp.addListener('appUrlOpen', async (data) => {
+            console.log('🔗 [App] Deep Link Open:', data.url);
+            // Handle Supabase OAuth Redirect
+            if (data.url.includes('login-callback') || data.url.includes('access_token') || data.url.includes('refresh_token')) {
+                try {
+                    // [V28 Fix] Manual URL Parsing for Supabase Session
+                    // getSessionFromUrl is not available in v2 client
+                    const url = new URL(data.url);
+                    const hashParams = new URLSearchParams(url.hash.substring(1)); // Remove #
+                    const queryParams = new URLSearchParams(url.search);
+
+                    const access_token = hashParams.get('access_token') || queryParams.get('access_token');
+                    const refresh_token = hashParams.get('refresh_token') || queryParams.get('refresh_token');
+
+                    if (access_token && refresh_token) {
+                        const { data: { session }, error } = await supabase.auth.setSession({
+                            access_token,
+                            refresh_token
+                        });
+
+                        if (error) throw error;
+
+                        if (session) {
+                            console.log("✅ [App] Session restored from Deep Link (Manual Parse)");
+                            // onAuthStateChange will pick this up automatically
+                        }
+                    } else {
+                        console.warn("⚠️ [App] No tokens found in Deep Link URL");
+                    }
+                } catch (e) {
+                    console.error("❌ [App] Deep Link Handling Error:", e);
+                }
+            }
+        });
+    }, []);
+
+    const handlePermissionComplete = () => {
+        setShowPermissionGuide(false);
+    };
+
+    // [V14] Safety Timeout for Loading Screen
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsLoading(false);
+        }, 2500); // Force disable loading after 2.5s
+        return () => clearTimeout(timer);
+    }, []);
+
+    // [Persistence] Save currentScreen
+    useEffect(() => {
+        console.log('🔄 [App.tsx] CurrentScreen 변경됨:', currentScreen);
+        if (currentScreen) {
+            localStorage.setItem('currentScreen', currentScreen);
+        }
+    }, [currentScreen]);
+
+    const [trips, setTrips] = useState<Trip[]>(() => {
+        const savedTrips = localStorage.getItem('trips');
+        return savedTrips ? JSON.parse(savedTrips) : [];
+    });
+    const [activeTrip, setActiveTrip] = useState<Trip | null>(() => {
+        // Restore active trip from trips list on boot
+        const savedTrips = localStorage.getItem('trips');
+        if (savedTrips) {
+            const parsed: Trip[] = JSON.parse(savedTrips);
+            return parsed.find(t => t.status === 'planning' || t.status === 'active') || null;
+        }
+        return null;
+    });
+
+    // Recent Completed Trips (for Home History)
+    const recentTrips = trips
+        .filter(t => t.status === 'completed' || t.status === 'cancelled')
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+        .slice(0, 5); // Limit to 5
+
+    const [selectedContacts, setSelectedContacts] = useState<Contact[]>([]);
+    const [contacts, setContacts] = useState<Contact[]>(() => {
+        const savedContacts = localStorage.getItem('contacts');
+        if (savedContacts) {
+            return JSON.parse(savedContacts);
+        }
+        return [];
+    });
+    // [V29] setupFormData Persistence
+    const [setupFormData, setSetupFormData] = useState<SetupFormData>(() => {
+        const saved = localStorage.getItem('setupFormData');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error('Failed to parse setupFormData', e);
+            }
+        }
+        return {
+            departure: '',
+            destination: '',
+            enableDeparture: true, // [Fix] Default to TRUE
+            enableArrival: true,
+            recipient: '',
+            departureCondition: 0,
+            departureMessage: '출발했습니다.',
+            arrivalCondition: 5,
+            arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+            navigationInfo: null,
+            selectedDestinationForNav: null,
+        };
+    });
+
+    // Save setupFormData whenever it changes
+    useEffect(() => {
+        localStorage.setItem('setupFormData', JSON.stringify(setupFormData));
+    }, [setupFormData]);
+
+    // Update activeTrip if trips change (e.g. status update)
+    useEffect(() => {
+        const current = trips.find(t => t.status === 'planning' || t.status === 'active');
+        if (current && (!activeTrip || activeTrip.id !== current.id)) {
+            setActiveTrip(current);
+        } else if (!current && activeTrip) {
+            setActiveTrip(null);
+        }
+    }, [trips]);
+
+    // Save trips to localStorage whenever they change
+    useEffect(() => {
+        localStorage.setItem('trips', JSON.stringify(trips));
+    }, [trips]);
+
+    // Save contacts to localStorage whenever they change
+    useEffect(() => {
+        localStorage.setItem('contacts', JSON.stringify(contacts));
+    }, [contacts]);
+
+    // User Profile State
+    const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+        const saved = localStorage.getItem('userProfile');
+        return saved ? JSON.parse(saved) : {
+            name: '게스트',
+            email: '',
+            phone: '',
+            points: 0,
+            pointHistory: [],
+        };
+    });
+    useEffect(() => {
+        localStorage.setItem('userProfile', JSON.stringify(userProfile));
+    }, [userProfile]);
+
+    // [Supabase] 로그인 상태 확인 - 이메일이 없으면 소개 화면으로
+    useEffect(() => {
+        if (isLoadingData) return; // [V46] Wait for data load
+
+        if (!userProfile.email || userProfile.email === '') {
+            console.log('👤 [App.tsx] 이메일 없음, Intro 화면으로 이동 (현재:', currentScreen, ')');
+            // setCurrentScreen('intro'); // 잠시 주석 처리하여 강제 리다이렉트가 문제인지 확인
+            if (currentScreen !== 'login' && currentScreen !== 'emailLogin' && currentScreen !== 'emailSignup') {
+                console.log('👉 [App.tsx] 로그인 화면이 아니므로 Intro로 리다이렉트');
+                setCurrentScreen('intro');
+            } else {
+                console.log('✋ [App.tsx] 이미 로그인 관련 화면이므로 리다이렉트 생략');
+            }
+        }
+    }, [isLoadingData, userProfile.email, currentScreen]);
+
+    // [Supabase] 인증 상태 리스너 - 로그인 시 userProfile 업데이트
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('🔵 [Auth State] Event:', event);
+            console.log('🔵 [Auth State] Session:', session ? 'exists' : 'null');
+
+            if (event === 'SIGNED_IN' && session?.user) {
+                console.log('✅ [Auth State] SIGNED_IN 이벤트 감지');
+                // ... (Auth Logic unchanged)
+                const googleName = session.user.user_metadata?.full_name ||
+                    session.user.user_metadata?.name ||
+                    session.user.email?.split('@')[0] ||
+                    '사용자';
+
+                console.log(`🔥 [App.tsx] 감지된 이름: ${googleName}`);
+
+                // [수정] Supabase에서 포인트 로딩 (Direct Fetch)
+                let userPoints = 0;
+                try {
+                    const { directSupabaseFetch } = await import('./lib/supabaseUtils');
+                    const profiles = await directSupabaseFetch(`profiles?id=eq.${session.user.id}&select=points`);
+
+                    if (profiles && profiles.length > 0) {
+                        userPoints = profiles[0].points || 0;
+                        console.log(`💰 [App.tsx] Supabase에서 포인트 로딩: ${userPoints}P`);
+                    } else {
+                        console.warn('⚠️ [App.tsx] 포인트 로딩 실패 (프로필 없음), 기본값 0 사용');
+                    }
+                } catch (err) {
+                    console.error('❌ [App.tsx] 포인트 로딩 오류:', err);
+                }
+
+                // [중요] DB 거치지 않고 즉시 상태 업데이트
+                const newProfile = {
+                    name: googleName,
+                    email: session.user.email || '',
+                    phone: '',
+                    points: userPoints, // ← Supabase에서 로딩한 값 사용
+                    pointHistory: [],
+                };
+
+                localStorage.removeItem('userProfile');
+                setUserProfile(newProfile);
+                localStorage.setItem('userProfile', JSON.stringify(newProfile));
+                localStorage.setItem('userId', session.user.id);
+                localStorage.setItem('supa_session_token', session.access_token);
+
+                setCurrentScreen('home');
+
+                // [백그라운드] Profile DB 자동 생성
+                setTimeout(async () => {
+                    try {
+                        const { directSupabaseFetch } = await import('./lib/supabaseUtils');
+                        const profiles = await directSupabaseFetch(`profiles?id=eq.${session.user.id}&select=id`);
+
+                        if (!profiles || profiles.length === 0) {
+                            console.log('🔵 [Background] Profile 자동 생성 시작...');
+                            await directSupabaseFetch('profiles', {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    id: session.user.id,
+                                    full_name: googleName,
+                                    email: session.user.email,
+                                    points: 0
+                                })
+                            });
+                            console.log('✅ [Background] Profile 자동 생성 완료');
+                        }
+                    } catch (error) {
+                        console.error('❌ [Background] Profile 생성 에러:', error);
+                    }
+                }, 100);
+
+            } else if (event === 'SIGNED_OUT') {
+                console.log('🔵 [Auth State] SIGNED_OUT 이벤트');
+                localStorage.removeItem('userProfile');
+                setUserProfile({
+                    name: '게스트',
+                    email: '',
+                    phone: '',
+                    points: 0,
+                    pointHistory: [],
+                });
+                setCurrentScreen('login');
+            }
+            setIsLoading(false);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        localStorage.setItem('userProfile', JSON.stringify(userProfile));
+    }, [userProfile]);
+
+    // [추가] 앱 켜질 때 '운행 중'이었는지 확인
+    useEffect(() => {
+        if (localStorage.getItem('trip_active') === 'true') {
+            setCurrentScreen('active'); // 대기 화면으로 바로 이동
+        }
+    }, []);
+
+    const deductPoints = async (amount: number, description: string = 'SMS 알림 발송 차감') => {
+        setUserProfile(prev => {
+            const newPoints = Math.max(0, (prev.points || 0) - amount);
+            return { ...prev, points: newPoints };
+        });
+
+        try {
+            const userId = localStorage.getItem('userId');
+            if (userId) {
+                // const { handlePointTransaction } = await import('./lib/supabaseUtils'); // Switched to static import
+                const newBalance = await handlePointTransaction({
+                    userId: userId,
+                    amount: amount,
+                    type: 'used',
+                    description: description
+                });
+                setUserProfile(prev => ({ ...prev, points: newBalance }));
+            }
+        } catch (e) {
+            console.error("Failed to sync point deduction:", e);
+        }
+    };
+
+    const handleCreateTrip = async (trip: Trip) => {
+        try {
+            const { TripNotification } = await import('./plugins/TripNotificationPlugin');
+
+            // @ts-ignore
+            const serviceStatus = await TripNotification.isServiceRunning();
+            const isReallyRunning = serviceStatus && serviceStatus.running;
+
+            if (activeTrip || isReallyRunning) {
+                console.log('🚨 운행 중 감지 - 예약 차단');
+                alert('🚨 이미 운행 중인 예약이 있습니다.\n\n운행을 완료하거나 취소한 후 다시 예약해주세요.');
+                return;
+            }
+
+            console.log('🚀 대기 없음, 즉시 출발!');
+            console.log('🔵 [예약] 1단계: 잔액 조회 시작...');
+
+            let userId = 'unknown';
+            let shouldDeductPoints = false;
+
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    userId = user.id;
+                    const { data: profile, error: fetchError } = await supabase
+                        .from('profiles')
+                        .select('points')
+                        .eq('id', userId)
+                        .single();
+
+                    if (!fetchError && profile) {
+                        const currentPoints = profile.points || 0;
+                        if (currentPoints >= 50) {
+                            shouldDeductPoints = true;
+                        } else {
+                            console.warn(`⚠️ [조회] 포인트 부족 (${currentPoints}P) - 차감 건너뜀`);
+                        }
+                    }
+                }
+            } catch (e: any) {
+                console.error('❌ [조회] 잔액 조회 실패:', e.message);
+            }
+
+            console.log('🔵 [예약] 2단계: 서비스 실행 시작...');
+
+            const pluginData = {
+                ...trip,
+                notifications: JSON.stringify(trip.notifications),
+                timeRemaining: trip.estimatedTime,
+                distance: trip.estimatedDistance,
+                waypoints: trip.waypoints,
+                destLat: trip.destinationLat,
+                destLng: trip.destinationLng,
+                initialStatus: trip.initialStatus || 'waiting',
+            };
+
+            try {
+                // @ts-ignore
+                await TripNotification.startNotification({ tripData: pluginData });
+                console.log('✅ [예약] 2단계 완료: Native Service 시작 성공');
+
+            } catch (serviceError: any) {
+                console.error('❌ [예약] 서비스 시작 실패:', serviceError);
+                alert('서비스 시작 실패: ' + (serviceError.message || JSON.stringify(serviceError)));
+                return;
+            }
+
+            console.log('🔵 [예약] 3단계: 완료 처리 (강제 실행)...');
+
+            const newActiveTrip = { ...trip, status: 'active' as const };
+            setTrips(prev => [...prev, newActiveTrip]);
+            setActiveTrip(newActiveTrip);
+            localStorage.setItem('trip_active', 'true');
+
+            setSetupFormData({
+                departure: '',
+                destination: '',
+                enableDeparture: false,
+                enableArrival: true,
+                recipient: '',
+                departureCondition: 0,
+                departureMessage: '출발했습니다.',
+                arrivalCondition: 5,
+                arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+                navigationInfo: null,
+                selectedDestinationForNav: null,
+            });
+
+            console.log('⏱️ [예약] 2초 후 운행 화면으로 강제 전환');
+            setTimeout(() => {
+                console.log('✅ [예약] 운행 화면으로 강제 전환 실행');
+                setCurrentScreen('active');
+            }, 2000);
+
+            // [V27] REMOVED: Pre-payment Logic. Moved to Post-payment in NavigationActive.tsx
+            // if (shouldDeductPoints) { ... }
+
+        } catch (error) {
+            console.error('Failed to start trip service:', error);
+            alert('서비스 시작 실패: ' + JSON.stringify(error));
+        }
+    };
+
+    const handleUpdateTrip = (updatedTrip: Trip) => {
+        const newTrips = trips.map(t => t.id === updatedTrip.id ? updatedTrip : t);
+        setTrips(newTrips);
+        if (activeTrip?.id === updatedTrip.id) {
+            setActiveTrip(updatedTrip);
+        }
+    };
+
+    const handleCancelTrip = async () => {
+        if (activeTrip) {
+            const updatedTrip = { ...activeTrip, status: 'cancelled' as const };
+            handleUpdateTrip(updatedTrip);
+
+            try {
+                const { TripNotification } = await import('./plugins/TripNotificationPlugin');
+                await TripNotification.stopNotification();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                console.log("Service stopped and cleaned up");
+            } catch (err) {
+                console.error("Failed to stop service:", err);
+            }
+
+            setActiveTrip(null);
+            setCurrentScreen('home');
+
+            // Cleanup form data
+            setSetupFormData({
+                departure: '',
+                destination: '',
+                enableDeparture: false,
+                enableArrival: true,
+                recipient: '',
+                departureCondition: 0,
+                departureMessage: '출발했습니다.',
+                arrivalCondition: 5,
+                arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+                navigationInfo: null,
+                selectedDestinationForNav: null,
+            });
+        }
+    };
+
+    // [New] Handle Trip Completion (Success)
+    const handleCompleteTrip = async () => {
+        if (activeTrip) {
+            console.log("✅ [App] Trip Completed. Updating history.");
+
+            // [Fix] Update status to 'completed' instead of removing
+            // This ensures it shows up in "History" (recentTrips)
+            const completedTrip = { ...activeTrip, status: 'completed' as const };
+
+            setTrips(prev => prev.map(t =>
+                t.id === activeTrip.id ? completedTrip : t
+            ));
+
+            // Clear Active State
+            setActiveTrip(null);
+            localStorage.removeItem('trip_active');
+
+            // [Fix] Reset Setup Form
+            setSetupFormData(prev => ({ ...prev, navigationInfo: null }));
+
+            setCurrentScreen('home');
+        }
+    };
+
+    const handleLogout = () => {
+        setShowLogoutModal(true);
+    };
+
+    const confirmLogout = async () => {
+        setShowLogoutModal(false);
+
+        const forceLogoutTimer = setTimeout(() => {
+            console.warn('⚠️ [Logout] Supabase 응답 없음 - 강제 로그아웃 실행');
+            performForceLogout();
+        }, 3000);
+
+        try {
+            await supabase.auth.signOut();
+            clearTimeout(forceLogoutTimer);
+            console.log('✅ [Logout] Supabase 로그아웃 성공');
+            performForceLogout();
+        } catch (error) {
+            clearTimeout(forceLogoutTimer);
+            console.error('❌ [Logout] Supabase 로그아웃 실패:', error);
+            performForceLogout();
+        }
+    };
+
+    const performForceLogout = () => {
+        setUserProfile({
+            name: '게스트',
+            email: '',
+            phone: '',
+            points: 0,
+            pointHistory: [],
+        });
+
+        // [Persistence Fix] Only clear session-specific data
+        // DO NOT clear: 'contacts', 'trips', 'kakao_recent_searches', 'setupFormData'
+        localStorage.removeItem('trip_active');
+        localStorage.removeItem('userProfile');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('supa_session_token');
+        localStorage.removeItem('setupFormData'); // Reset setup form on logout for safety
+
+        // localStorage.clear(); // ❌ This was deleting contacts and history
+
+        setCurrentScreen('login');
+    };
+
+    const handleSelectContacts = (contacts: Contact[]) => {
+        setSelectedContacts(contacts);
+        setCurrentScreen('setup');
+    };
+
+    const handleToggleFavoriteTrip = (tripId: string) => {
+        setTrips(prev => prev.map(t =>
+            t.id === tripId ? { ...t, isFavorite: !t.isFavorite } : t
+        ));
+    };
+
+
+
+    const handleDeleteTrip = (tripId: string) => {
+        setTrips(trips.filter(t => t.id !== tripId));
+    };
+
+    const handleRebookTrip = (trip: Trip) => {
+        const { id, startTime, startLat, startLng, notifications, ...rest } = trip;
+        const resetNotifications = notifications.map(n => ({
+            ...n,
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            status: 'pending' as const
+        }));
+
+        const newTrip: Trip = {
+            ...rest,
+            id: Date.now().toString(),
+            status: 'planning',
+            createdAt: new Date().toISOString(),
+            notifications: resetNotifications,
+            startLat: trip.startLat,
+            startLng: trip.startLng,
+        };
+
+        setTrips((prev) => [...prev, newTrip]);
+        setCurrentScreen('list');
+    };
+
+    // [New] Load Trip to Setup (Edit before Start)
+    const handleLoadTripToSetup = (trip: Trip) => {
+        // [V36] Active Trip Guard
+        // Check if there is already an active trip running
+        const isTripActive = localStorage.getItem('trip_active') === 'true' || activeTrip !== null;
+
+        if (isTripActive) {
+            alert("운행 중에는 새로운 예약을 불러올 수 없습니다.\n현재 운행을 종료하거나 취소한 후 다시 시도해주세요.");
+            return;
+        }
+
+        // Parse notifications to find trigger settings
+        const lastNotif = trip.notifications[trip.notifications.length - 1];
+
+        // [V36] Parse Waypoints (Trigger Locations)
+        let parsedTriggerLocations: { lat: number, lng: number, name: string, address: string }[] = [];
+        try {
+            if (trip.waypoints) {
+                const parsed = JSON.parse(trip.waypoints);
+                // Ensure match TriggerLocation type (add address if missing)
+                parsedTriggerLocations = parsed.map((loc: any) => ({
+                    lat: loc.lat,
+                    lng: loc.lng,
+                    name: loc.name,
+                    address: loc.address || ''
+                }));
+            }
+        } catch (e) {
+            console.warn("Failed to parse waypoints for setup:", e);
+        }
+
+        setSetupFormData({
+            departure: '', // [Fix] Always clear start point (User Request)
+            destination: trip.destination,
+            recipient: trip.recipient || '',
+            departureCondition: 0,
+            departureMessage: '출발했습니다.',
+            arrivalCondition: Number(trip.triggerValue) || 5,
+            arrivalMessage: lastNotif?.message || '[알림] 도착 예정입니다.',
+            navigationInfo: null,
+            selectedDestinationForNav: {
+                name: trip.destination,
+                x: trip.destinationLng?.toString() || '0',
+                y: trip.destinationLat?.toString() || '0',
+                lat: trip.destinationLat, // [Fix] Explicit lat/lng for Validation
+                lng: trip.destinationLng, // [Fix] Explicit lat/lng for Validation
+                address: ''
+            },
+            enableArrival: true,
+            enableDeparture: false,
+            triggerLocations: parsedTriggerLocations // [V36] Pass parsed locations
+        });
+
+        // Load Contacts if possible (Simple name matching or empty)
+        // We don't have full contact objects here easily unless we match by phone
+        setSelectedContacts([]);
+
+        setCurrentScreen('setup');
+    };
+
+    // [V36] Enter Favorites Selection Mode
+    const handleEnterFavoritesSelectionMode = () => {
+        // Active Trip Guard
+        const isTripActive = localStorage.getItem('trip_active') === 'true' || activeTrip !== null;
+        if (isTripActive) {
+            alert("운행 중에는 즐겨찾기를 추가할 수 없습니다.");
+            return;
+        }
+
+        setIsFavoritesSelectionMode(true);
+        setCurrentScreen('list');
+    };
+
+    const handleResetAndNavigateSetup = () => {
+        setSetupFormData({
+            departure: '',
+            destination: '',
+            recipient: '',
+            departureCondition: 0,
+            departureMessage: '출발했습니다.',
+            arrivalCondition: 5,
+            arrivalMessage: '[알림] 현재 {currentLocation} 근처입니다. {destination}까지 약 {time}분 남았습니다.',
+            navigationInfo: null,
+            selectedDestinationForNav: null,
+            enableArrival: true,
+            enableDeparture: false,
+        });
+        setSelectedContacts([]);
+        setCurrentScreen('setup');
+    };
+
+    useEffect(() => {
+        const checkSession = async () => {
+            const supabase = createClient();
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (session?.access_token) {
+                setAuthToken(session.access_token);
+                if (currentScreen === 'home' || currentScreen === 'login') {
+                    setCurrentScreen('setup');
+                }
+            }
+        };
+
+        checkSession();
+
+        if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+            import('./plugins/TripNotificationPlugin').then(async ({ TripNotification }) => {
+                try {
+                    console.log("Requesting Battery Optimization Ignore...");
+                    await TripNotification.requestIgnoreBatteryOptimizations();
+                } catch (e) {
+                    console.error("Failed to request battery optimization ignore", e);
+                }
+            });
+        }
+
+        if (Capacitor.isNativePlatform()) {
+            StatusBar.show().catch(() => console.log('StatusBar show failed'));
+            StatusBar.setStyle({ style: Style.Dark }).catch(() => console.log('StatusBar setStyle failed'));
+            StatusBar.setOverlaysWebView({ overlay: false }).catch(() => console.log('StatusBar overlay failed'));
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!Capacitor.isNativePlatform()) return;
+
+        const backButtonListener = CapApp.addListener('backButton', () => {
+            const navigationStack: Record<Screen, Screen | null> = {
+                'intro': null,
+                'home': null,
+                'setup': 'home',
+                'active': 'home',
+                'list': 'home',
+                'settings': 'home',
+                'contacts': 'setup',
+                'contactsManage': 'settings',
+                'favorites': 'settings',
+                'login': 'home',
+                'profile': 'settings',
+                'messages': 'settings',
+                'theme': 'settings',
+                'emailLogin': 'login',
+                'emailSignup': 'emailLogin',
+                'mypage': 'home',
+                'admin': 'home'
+            };
+
+            const targetScreen = navigationStack[currentScreen];
+            if (targetScreen) {
+                setCurrentScreen(targetScreen);
+            } else {
+                CapApp.exitApp();
+            }
+        });
+
+        return () => {
+            backButtonListener.then(handler => handler.remove());
+        };
+    }, [currentScreen]);
+
+    const renderScreen = () => {
+        console.log('🎨 [App.tsx] renderScreen 실행, 현재 화면:', currentScreen);
+
+        if (currentScreen === 'login') {
+            return (
+                <SnsLogin
+                    onBack={() => setCurrentScreen('intro')}
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                />
+            );
+        }
+
+        switch (currentScreen) {
+            case 'intro': return null;
+            case 'home':
+                return <HomePage
+                    onNavigate={(screen) => {
+                        if (screen === 'setup') handleResetAndNavigateSetup();
+                        else setCurrentScreen(screen);
+                    }}
+                    onSelectTrip={setActiveTrip}
+                    // ✅ CRITICAL FIX: Only pass ACTIVE trips to Home. Queued ('planning') trips hidden.
+                    activeTrips={activeTrip ? [activeTrip] : []} // Pass activeTrips as array
+                    recentTrips={recentTrips}
+                    userProfile={userProfile}
+                    favoriteTrips={trips.filter(t => t.isFavorite)}
+                    onStartTrip={(trip) => {
+                        handleLoadTripToSetup(trip);
+                    }}
+                    onEnterSelectionMode={handleEnterFavoritesSelectionMode} // [V36] Pass handler
+                />;
+            case 'setup':
+                return <NotificationSetup
+                    onBack={() => setCurrentScreen('home')}
+                    onComplete={handleCreateTrip}
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    selectedContacts={selectedContacts}
+                    setSelectedContacts={setSelectedContacts}
+                    setupFormData={setupFormData}
+                    setSetupFormData={setSetupFormData}
+                    contacts={contacts} // [V27] Pass contacts for autocomplete
+                />;
+            case 'active':
+                // ✅ FIX: Check if activeTrip is null before rendering
+                // We should theoretically have one if we are here.
+                if (!activeTrip) {
+                    setCurrentScreen('home');
+                    return null;
+                }
+                return <NavigationActive
+                    trip={activeTrip}
+                    onUpdate={handleUpdateTrip}
+                    onCancel={handleCancelTrip}
+                    onComplete={handleCompleteTrip} // [New] Pass completion handler
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    userPoints={userProfile.points}
+                    deductPoints={deductPoints}
+                />;
+            case 'list':
+                return <NotificationList
+                    trips={trips}
+                    onToggleFavorite={handleToggleFavoriteTrip}
+                    selectionMode={isFavoritesSelectionMode} // [V36] Pass selection mode
+                    onSelectTrip={(trip) => {
+                        if (isFavoritesSelectionMode) {
+                            // [V36] Handle Selection Mode: Add to Favorite
+                            handleToggleFavoriteTrip(trip.id);
+                            alert(`'${trip.destination}' 즐겨찾기에 추가되었습니다.`);
+                            setIsFavoritesSelectionMode(false);
+                            setCurrentScreen('home'); // Return to Home
+                        } else {
+                            // Standard mode: Do nothing or handle navigation
+                            // For now, allow viewing details if implemented, but blocked by requirement to use selection mode only for adding
+                            console.log('Selected trip', trip);
+                        }
+                    }}
+                    onCancelTrip={(tripId) => handleDeleteTrip(tripId)}
+                    onDeleteTrip={handleDeleteTrip} // [UI] Enable Delete
+                    onNavigate={(screen) => {
+                        if (screen === 'home' && isFavoritesSelectionMode) {
+                            setIsFavoritesSelectionMode(false); // Cleanup on exit
+                        }
+                        setCurrentScreen(screen);
+                    }}
+                />;
+            case 'settings':
+                return <Settings
+                    onNavigate={(screen) => {
+                        setIsFavoritesSelectionMode(false); // Cleanup
+                        setCurrentScreen(screen);
+                    }}
+                    currentTheme={currentTheme}
+                />;
+            case 'favorites':
+                return <FavoriteTrips
+                    trips={trips}
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    onRebook={handleRebookTrip} // Keep for generic rebook if needed
+                    onStartTrip={handleLoadTripToSetup} // ✅ [New] For Quick Reserve -> Setup
+                    onToggleFavorite={handleToggleFavoriteTrip}
+                    onUpdateTrip={handleUpdateTrip}
+                    onEnterSelectionMode={handleEnterFavoritesSelectionMode} // [V36] Pass handler
+                />;
+            case 'contacts':
+                return <ContactManagement
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    contacts={contacts}
+                    setContacts={setContacts}
+                    mode="select"
+                    fromScreen="setup"
+                    onSelectContacts={handleSelectContacts}
+                    selectionMode={true}
+                    initialSelectedContacts={selectedContacts}
+                />;
+            case 'contactsManage':
+                return <ContactManagement
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    contacts={contacts}
+                    setContacts={setContacts}
+                    mode="manage"
+                    fromScreen="settings"
+                />;
+
+            case 'messages':
+                return <MessageManagement onNavigate={(screen) => setCurrentScreen(screen)} />;
+            case 'profile':
+                return <ProfileEdit
+                    userProfile={userProfile}
+                    onUpdateProfile={(updated) => setUserProfile(updated)}
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                />;
+
+            case 'theme':
+                return <ThemeSelector
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    currentTheme={currentTheme}
+                    onThemeChange={(theme) => setCurrentTheme(theme)}
+                />;
+            case 'emailLogin':
+                return <EmailLogin
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    currentTheme={currentTheme}
+                    onLoginSuccess={() => { }}
+                />;
+            case 'emailSignup':
+                return <EmailSignup
+                    onNavigate={(screen) => setCurrentScreen(screen)}
+                    currentTheme={currentTheme}
+                />;
+            case 'mypage':
+                return <MyPage onNavigate={(screen) => setCurrentScreen(screen)} userProfile={userProfile} onLogout={handleLogout} />;
+            case 'admin':
+                // Admin Page access control
+                if (userProfile.email !== ADMIN_EMAIL) {
+                    alert("관리자 권한이 없습니다.");
+                    setCurrentScreen('home');
+                    return null;
+                }
+                return <AdminPage onNavigate={(screen) => setCurrentScreen(screen)} />;
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className={`app-container ${currentTheme} w-full h-full`}>
+            {/* [V23] Permission Guide Overlay */}
+            {showPermissionGuide && (
+                <PermissionGuide onComplete={handlePermissionComplete} />
+            )}
+
+            {currentScreen === 'intro' && <IntroPage onNavigate={(screen) => setCurrentScreen(screen)} />}
+
+            <div className="bg-background-light dark:bg-background-dark text-text-light dark:text-text-dark min-h-screen">
+                {renderScreen()}
+
+                {/* Bottom Navigation */}
+                {/* Bottom Navigation */}
+                {(currentScreen === 'home' || currentScreen === 'list' || currentScreen === 'mypage' || currentScreen === 'setup') && (
+                    <div className="fixed bottom-0 left-0 right-0 h-16 pb-8 box-content bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 flex justify-around items-center z-50">
+                        <button
+                            onClick={() => setCurrentScreen('home')}
+                            className={`flex flex-col items-center justify-center w-full h-full ${currentScreen === 'home' ? 'text-app-accent' : 'text-gray-400'}`}
+                        >
+                            <Home className="w-6 h-6 mb-1" />
+                            <span className="text-[10px]">홈</span>
+                        </button>
+                        <button
+                            onClick={() => handleResetAndNavigateSetup()}
+                            className={`flex flex-col items-center justify-center w-full h-full ${currentScreen === 'setup' ? 'text-app-accent' : 'text-gray-400'}`}
+                        >
+                            <Plus className="w-6 h-6 mb-1" />
+                            <span className="text-[10px]">예약하기</span>
+                        </button>
+                        <button
+                            onClick={() => setCurrentScreen('list')}
+                            className={`flex flex-col items-center justify-center w-full h-full ${currentScreen === 'list' ? 'text-app-accent' : 'text-gray-400'}`}
+                        >
+                            <History className="w-6 h-6 mb-1" />
+                            <span className="text-[10px]">내역보기</span>
+                        </button>
+                        <button
+                            onClick={() => setCurrentScreen('mypage')}
+                            className={`flex flex-col items-center justify-center w-full h-full ${currentScreen === 'mypage' ? 'text-app-accent' : 'text-gray-400'}`}
+                        >
+                            <User className="w-6 h-6 mb-1" />
+                            <span className="text-[10px]">마이페이지</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Loading Screen Overlay */}
+            {isLoading && <LoadingScreen />}
+
+            <LogoutModal
+                isOpen={showLogoutModal}
+                onClose={() => setShowLogoutModal(false)}
+                onConfirm={confirmLogout}
+            />
+        </div>
+    );
+};
+
+export default App;

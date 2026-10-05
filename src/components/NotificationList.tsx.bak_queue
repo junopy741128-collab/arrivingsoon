@@ -1,0 +1,180 @@
+import { useState } from 'react';
+import { ChevronLeft, Info, MapPin, Clock, Calendar, Check, X, Star } from 'lucide-react'; // Added Star
+import { formatRecipientDisplay } from '../utils/formatters';
+import type { Screen, Trip } from '../App';
+
+interface NotificationListProps {
+  trips: Trip[];
+  onNavigate: (screen: Screen) => void;
+  onSelectTrip: (trip: Trip) => void;
+  onCancelTrip: (tripId: string) => void;
+  onToggleFavorite?: (tripId: string) => void; // Added
+}
+
+export function NotificationList({ trips, onNavigate, onSelectTrip, onCancelTrip, onToggleFavorite }: NotificationListProps) {
+  // ... rest of the component until the map loop ...
+  // I will use replace_file_content for the whole component or crucial parts because it's safer.
+  // Let's replace the top part first to add Import and Interface.
+  // Then Replace the item part.
+
+  // WAIT, I cannot do two separate replace_file_content calls in one go if they are overlapping or if I want to be precise.
+  // I'll stick to replacing chunks.
+
+  // Actually, I'll use multi_replace.
+
+  const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
+
+  // Filter trips based on tab
+  const pendingTrips = trips.filter(t => t.status === 'planning');
+  const historyTrips = trips.filter(t => t.status === 'completed' || t.status === 'cancelled');
+
+  const displayTrips = activeTab === 'pending' ? pendingTrips : historyTrips;
+
+  // Sort by date desc
+  const sortedTrips = [...displayTrips].sort((a, b) => {
+    return (new Date(b.createdAt || 0).getTime()) - (new Date(a.createdAt || 0).getTime());
+  });
+
+  const getStatusBadge = (status: Trip['status']) => {
+    switch (status) {
+      case 'planning':
+        return <span className="bg-[#eab308] text-black px-3 py-1 rounded-full text-xs font-bold">예약</span>;
+      case 'active':
+        return <span className="bg-app-accent text-app-primary px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 bg-app-primary rounded-full animate-pulse"></span>운행중</span>;
+      case 'completed':
+        return <span className="bg-gray-600 text-white px-3 py-1 rounded-full text-xs font-bold">완료</span>;
+      case 'cancelled':
+        return <span className="bg-red-500/20 text-red-500 px-3 py-1 rounded-full text-xs font-bold">취소</span>;
+      default:
+        return null;
+    }
+  };
+
+  const calculateTimeAgo = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `약 ${mins}분 전`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `약 ${hours}시간 전`;
+    return new Date(dateStr).toLocaleDateString();
+  };
+
+  return (
+    <div className="flex flex-col w-full h-full bg-app-primary text-text-primary overflow-hidden">
+      {/* Header */}
+      <header className="pt-safe px-4 h-16 flex items-center gap-4 border-b border-border bg-app-primary sticky top-0 z-20">
+        <button
+          onClick={() => onNavigate('home')}
+          className="p-2 -ml-2 text-text-muted hover:text-white transition-colors"
+        >
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-bold flex-1 text-center pr-10">알림 내역</h1>
+        <button className="text-sm text-text-muted hover:text-white transition-colors">편집</button>
+      </header>
+
+      {/* Tab Toggles */}
+      <div className="px-6 py-4 flex gap-4">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`flex-1 h-12 rounded-full font-bold text-sm transition-all duration-300 border-2 ${activeTab === 'pending' ? 'bg-app-accent border-app-accent text-app-primary shadow-[0_0_15px_rgba(0,255,136,0.3)]' : 'bg-transparent border-transparent text-text-muted hover:bg-app-secondary'}`}
+        >
+          예약 대기
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`flex-1 h-12 rounded-full font-bold text-sm transition-all duration-300 border-2 ${activeTab === 'history' ? 'bg-[#374151] border-[#4b5563] text-white shadow-lg' : 'bg-transparent border-transparent text-text-muted hover:bg-app-secondary'}`}
+        >
+          완료 내역
+        </button>
+      </div>
+
+      {/* Content List */}
+      <div className="flex-1 overflow-y-auto px-6 pb-24 scrollbar-hide">
+        {sortedTrips.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-[50vh] text-text-muted gap-4 opacity-50">
+            <Info className="w-12 h-12" />
+            <p className="text-sm">{activeTab === 'pending' ? '대기 중인 예약이 없습니다.' : '완료된 내역이 없습니다.'}</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sortedTrips.map((trip) => (
+              <div
+                key={trip.id}
+                onClick={() => {
+                  if (trip.status === 'active' || trip.status === 'planning') {
+                    onSelectTrip(trip);
+                    onNavigate('active');
+                  }
+                }}
+                className={`bg-app-secondary border border-border rounded-2xl p-5 relative overflow-hidden transition-all group ${trip.status === 'active' ? 'ring-1 ring-app-accent cursor-pointer active:scale-[0.98]' : 'hover:border-gray-600'}`}
+              >
+                {/* Top Row: Address & Status */}
+                <div className="flex justify-between items-start gap-4 mb-4">
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className={`w-5 h-5 mt-0.5 shrink-0 ${activeTab === 'pending' ? 'text-app-accent' : 'text-gray-500'}`} />
+                    <h3 className={`font-bold text-lg leading-snug break-keep ${activeTab === 'history' ? 'text-gray-300' : 'text-white'}`}>{trip.destination}</h3>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    {getStatusBadge(trip.status)}
+                    {trip.status === 'planning' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('예약을 취소하시겠습니까?')) {
+                            onCancelTrip(trip.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-full bg-gray-700/50 hover:bg-red-500/20 text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                    {/* Add Star for History/Completed/Cancelled */}
+                    {(activeTab === 'history' && onToggleFavorite) && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleFavorite(trip.id);
+                        }}
+                        className="p-1.5 rounded-full bg-gray-700/50 hover:bg-yellow-500/20 transition-colors"
+                      >
+                        <Star
+                          className={`w-4 h-4 ${trip.isFavorite ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400'}`}
+                        />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Divider Line */}
+                <div className="h-px bg-gray-700/50 w-full mb-4" />
+
+                {/* Bottom Row: Recipient & Time */}
+                <div className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2 text-text-muted">
+                    <UserIcon />
+                    <span className="text-gray-300">{formatRecipientDisplay(trip.recipient)}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>{calculateTimeAgo(trip.createdAt)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Simple Icon Component
+const UserIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+  </svg>
+);

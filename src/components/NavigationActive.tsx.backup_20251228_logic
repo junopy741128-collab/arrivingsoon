@@ -1,0 +1,847 @@
+import { useState, useEffect, useRef } from 'react';
+import { MapPin, Bell, AlertCircle, Navigation, Clock, User, Check } from 'lucide-react';
+import { Button } from './ui/button';
+import { formatRecipientDisplay } from '../utils/formatters';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import type { Trip, Screen } from '../App';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import Overlay from '../utils/overlay';
+import { TripNotification } from '../plugins/TripNotificationPlugin';
+import LocalSms from '../plugins/LocalSmsPlugin';
+import { getRouteInfoKakao, reverseGeocodeKakao } from '../utils/kakao-service';
+
+// Mock Toast to avoid plugin error
+const Toast = {
+  show: async ({ text }: { text: string; duration?: string }) => {
+    if (text.includes('실패') || text.includes('오류') || text.includes('성공')) {
+      alert(text);
+    }
+    console.log('[Toast]', text);
+  }
+};
+
+// Internal helper to replace sendSms service
+const triggerSms = async (content: string, receiver: string): Promise<boolean> => {
+  // Extract numbers using Regex to handle "Name (010-1234-5678)" format
+  const matches = receiver.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+  const numbers = matches ? matches.map(n => n.replace(/-/g, '')) : [];
+
+  if (numbers.length === 0) return false;
+
+  let successCount = 0;
+  for (const phoneNumber of numbers) {
+    try {
+      const result = await LocalSms.sendSms({ phoneNumber, message: content });
+      if (result.success) successCount++;
+    } catch (e) {
+      console.error(`Failed to send SMS to ${phoneNumber}`, e);
+    }
+  }
+  return successCount > 0;
+};
+
+// Helper: Replace template variables
+const replaceTemplateVariables = (message: string, variables: any) => {
+  return message
+    .replace(/{time}/g, variables.time)
+    .replace(/{driverName}/g, variables.driverName)
+    .replace(/{destination}/g, variables.destination)
+    .replace(/{departure}/g, variables.departure)
+    .replace(/{currentLocation}/g, variables.currentLocation); // Added
+};
+
+// Helper: Haversine Distance
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
+};
+
+interface NavigationActiveProps {
+  trip: Trip;
+  onUpdate: (trip: Trip) => void;
+  onCancel: () => void;
+  onNavigate: (screen: Screen) => void;
+}
+
+export function NavigationActive({ trip, onUpdate, onCancel, onNavigate }: NavigationActiveProps) {
+  // State
+  const [navigationStatus, setNavigationStatus] = useState<'waiting' | 'active'>('waiting'); // Smart Start Mode
+  const [currentTime, setCurrentTime] = useState(trip.estimatedTime || 15);
+  const [currentDistance, setCurrentDistance] = useState(trip.estimatedDistance || 8);
+  const [status, setStatus] = useState<'connecting' | 'active' | 'error'>('connecting');
+  const [heading, setHeading] = useState(0); // Heading State
+
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [isCancelCompleteDialogOpen, setIsCancelCompleteDialogOpen] = useState(false);
+  const [isCompleteDialogOpen, setIsCompleteDialogOpen] = useState(false);
+  const [completeTimer, setCompleteTimer] = useState(3);
+
+  // Manual Send State
+  const [isManualSendDialogOpen, setIsManualSendDialogOpen] = useState(false);
+  const [manualRecipient, setManualRecipient] = useState('');
+  const [manualMessage, setManualMessage] = useState('');
+
+  // UI State
+  const [pulseSpeed, setPulseSpeed] = useState<'slow' | 'medium' | 'fast'>('slow');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [locationName, setLocationName] = useState<string>('대기 중');
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
+  // Refs
+  const watchId = useRef<string | null>(null);
+  const locationNotificationSentRef = useRef(false);
+  const departureNotificationSentRef = useRef(false);
+  const notificationsRef = useRef(trip.notifications);
+  const tripRef = useRef(trip);
+
+  // Map Refs
+  const mapRef = useRef<any>(null);
+  const userOverlayRef = useRef<any>(null); // Custom Overlay for User
+
+  useEffect(() => {
+    notificationsRef.current = trip.notifications;
+    tripRef.current = trip;
+  }, [trip]);
+
+  // Initialize Map
+  useEffect(() => {
+    const initMap = () => {
+      const container = document.getElementById('active-map');
+      if (!container || !window.kakao) return;
+
+      const options = {
+        center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+        level: 4, // Zoomed in for navigation
+        draggable: false, // Lock drag in nav mode? Maybe safer. Let's keep it enabled but reset on update.
+        zoomable: true
+      };
+
+      const map = new window.kakao.maps.Map(container, options);
+      mapRef.current = map;
+
+      // Destination Marker
+      if (trip.destinationLat && trip.destinationLng) {
+        const destPosition = new window.kakao.maps.LatLng(trip.destinationLat, trip.destinationLng);
+        const markerImage = new window.kakao.maps.MarkerImage(
+          'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/blue_b.png',
+          new window.kakao.maps.Size(50, 45),
+          { offset: new window.kakao.maps.Point(15, 43) }
+        );
+        new window.kakao.maps.Marker({
+          position: destPosition,
+          image: markerImage,
+          map: map
+        });
+      }
+    };
+
+    setTimeout(initMap, 500);
+  }, []);
+
+  // Update Map Position & Rotation
+  useEffect(() => {
+    if (!mapRef.current || !window.kakao) return;
+
+    // Apply Rotation to Container
+    const container = document.getElementById('active-map');
+    if (container) {
+      // Rotate -heading to keep UP. Scale 1.5 to cover corners.
+      container.style.transform = `rotate(-${heading}deg) scale(1.5)`;
+      container.style.transition = 'transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+    }
+
+    const updateMapPosition = async () => {
+      try {
+        const pos = await Geolocation.getCurrentPosition();
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const moveLatLon = new window.kakao.maps.LatLng(lat, lng);
+
+        // Pan to new location (Center User)
+        mapRef.current.setCenter(moveLatLon);
+
+        // Update User Overlay (Car Icon)
+        if (!userOverlayRef.current) {
+          // Create Custom Overlay Element
+          const content = document.createElement('div');
+          content.className = 'user-marker-car';
+          content.style.width = '40px';
+          content.style.height = '40px';
+          content.style.display = 'flex';
+          content.style.alignItems = 'center';
+          content.style.justifyContent = 'center';
+          // Inner Arrow that rotates +Heading
+          // Since Map rotates -Heading, we want marker to rotate +Heading to align with Map's North? 
+          // NO. We want marker to point UP (Screen Up).
+          // Map rotates -Heading. So North is now at -Heading.
+          // If we render a static UP arrow, it points Screen UP.
+          // Screen UP matches Vehicle Heading because Map is rotated.
+          // So we technically DON'T need to rotate the marker relative to the container if we want it to point "forward" on the map?
+          // WAIT.
+          // Container rotates. Everything inside rotates.
+          // If I put a DOM element in CustomOverlay, it belongs to the map pane.
+          // It rotates WITH the map.
+          // So if Map rotates -90, Overlay rotates -90. Points Left.
+          // I want it to point UP. So I must rotate it +90 (or +Heading).
+
+          content.innerHTML = `
+              <div id="user-car-icon" style="
+                width: 32px; height: 32px; 
+                background: white; border-radius: 50%; 
+                box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+                display: flex; align-items: center; justify-content: center;
+                transform: rotate(${heading}deg);
+                transition: transform 0.3s ease;
+              ">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="#00C853" stroke="none">
+                  <path d="M12 2L2 22L12 18L22 22L12 2Z" />
+                </svg>
+              </div>
+            `;
+
+          userOverlayRef.current = new window.kakao.maps.CustomOverlay({
+            position: moveLatLon,
+            content: content,
+            map: mapRef.current,
+            yAnchor: 0.5,
+            zIndex: 999
+          });
+        } else {
+          userOverlayRef.current.setPosition(moveLatLon);
+          // Update rotation of the inner icon
+          const icon = document.getElementById('user-car-icon');
+          if (icon) {
+            icon.style.transform = `rotate(${heading}deg)`;
+          }
+        }
+
+      } catch (e) { /* ignore */ }
+    };
+
+    updateMapPosition();
+  }, [currentDistance, heading]); // Dependent on heading updates
+
+
+  // Helper log function
+  const addLog = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('ko-KR');
+    console.log(`[${type}] ${message}`);
+  };
+
+  // --- Logic: Complete Timer ---
+  useEffect(() => {
+    let timerId: NodeJS.Timeout;
+    if (isCompleteDialogOpen) {
+      setCompleteTimer(3);
+      timerId = setInterval(() => {
+        setCompleteTimer((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerId);
+            handleCompleteDone();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => { if (timerId) clearInterval(timerId); };
+  }, [isCompleteDialogOpen]);
+
+  const handleCompleteDone = async () => {
+    setIsCompleteDialogOpen(false);
+    try {
+      if (watchId.current !== null) Geolocation.clearWatch({ id: watchId.current });
+      await TripNotification.stopNotification();
+    } catch (e) { console.error(e); }
+    onNavigate('list');
+  };
+
+  // --- Logic: Overlay ---
+  useEffect(() => {
+    const initOverlay = async () => {
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          const { granted } = await Overlay.checkPermission();
+          if (granted) await Overlay.show();
+        } catch (e: any) { console.log('Overlay not available'); }
+      }
+    };
+    initOverlay();
+    return () => { Overlay.hide().catch(e => console.error(e)); };
+  }, []);
+
+  // --- Logic: Periodic Recalculation via API (Only in Active Mode) ---
+  useEffect(() => {
+    if (navigationStatus !== 'active') return; // STOP API calls if waiting
+
+    const recalcInterval = setInterval(async () => {
+      try {
+        const pos = await Geolocation.getCurrentPosition();
+        const currentLat = pos.coords.latitude;
+        const currentLng = pos.coords.longitude;
+        const t = tripRef.current; // Use Ref
+
+        if (t.destinationLat && t.destinationLng) {
+          const route = await getRouteInfoKakao(currentLat, currentLng, t.destinationLat, t.destinationLng);
+          if (route) {
+            const newDistKm = route.distance / 1000;
+            const newTimeMin = Math.round(route.duration / 60);
+
+            // Update State (UI)
+            setCurrentDistance(newDistKm);
+            setCurrentTime(newTimeMin);
+
+            // Update Ref (for logic stability)
+            // Note: tripRef is updated via useEffect [trip], so we rely on onUpdate being called effectively if we wanted to save this.
+            // But here we just update local state `currentTime`.
+
+            // Sync Native
+            TripNotification.updateNotification({
+              tripData: {
+                destination: t.destination,
+                recipient: t.recipient,
+                apiKey: import.meta.env.VITE_KAKAO_REST_API_KEY,
+                timeRemaining: newTimeMin,
+                distance: Math.round(newDistKm),
+                destLat: t.destinationLat,
+                destLng: t.destinationLng,
+                targetDistance: 10.0
+              }
+            }).catch(e => console.error(e));
+          }
+        }
+
+        // Location Name Update
+        if (currentDistance <= 15) {
+          const name = await reverseGeocodeKakao(currentLat, currentLng);
+          if (name) setLocationName(name);
+        }
+
+      } catch (e) { console.error("재탐색 실패:", e); }
+    }, 30000);
+    return () => clearInterval(recalcInterval);
+  }, [currentDistance]);
+
+
+  // --- Logic: Native Listener (Fallback) ---
+  useEffect(() => {
+    let listenerHandle: any = null;
+    const setupListener = async () => {
+      listenerHandle = await TripNotification.addListener('tripLocationUpdate', (data: { distKm: number; timeMin: number; status?: string }) => {
+        // Only update if legitimate
+        if (data.timeMin > 0) setCurrentTime(data.timeMin);
+        if (data.distKm >= 0) setCurrentDistance(data.distKm);
+
+        // Sync Status (Fix for "Stuck Waiting")
+        if (data.status === 'active' || data.status === 'waiting') {
+          setNavigationStatus(data.status as any);
+          if (data.status === 'active' && !departureNotificationSentRef.current) {
+            departureNotificationSentRef.current = true;
+            onUpdate({ ...trip, status: 'active' });
+          }
+        }
+
+        // Persist Data (Fix for "39 min reset")
+        if (data.timeMin > 0 && data.distKm >= 0) {
+          onUpdate({
+            ...tripRef.current,
+            estimatedTime: data.timeMin,
+            estimatedDistance: data.distKm,
+            status: data.status === 'active' ? 'active' : tripRef.current.status
+          });
+        }
+      });
+    };
+    setupListener();
+    return () => {
+      if (listenerHandle) listenerHandle.remove();
+    };
+  }, []);
+
+
+  // --- Logic: Main GPS & Notification Start ---
+  useEffect(() => {
+    const startBackgroundService = async () => {
+      try {
+        if (Capacitor.getPlatform() === 'android') {
+          await LocalNotifications.requestPermissions();
+          await LocalSms.requestPermission();
+        }
+        const startNativeService = async () => {
+          try {
+            await TripNotification.startTrip({
+              destination: trip.destination,
+              recipient: trip.recipient || '',
+              apiKey: import.meta.env.VITE_KAKAO_REST_API_KEY,
+              timeRemaining: Math.floor(trip.estimatedTime),
+              distance: Math.floor(trip.estimatedDistance),
+              destLat: trip.destinationLat || 0,
+              destLng: trip.destinationLng || 0,
+              targetDistance: trip.targetDistance || 10,
+              startLat: trip.startLat || 0,     // Native Smart Start
+              startLng: trip.startLng || 0,
+              status: navigationStatus,         // Initial status
+              notifications: JSON.stringify(trip.notifications) // ✅ Pass full list
+            });
+            console.log('Native notification service started');
+          } catch (e) {
+            console.error('Failed to start native notification:', e);
+          }
+        };
+
+        startNativeService();
+
+        // Listen for events from Native Service
+        const infoListener = TripNotification.addListener('tripLocationUpdate', (info: any) => {
+          // Native service is source of truth for location in background
+          // We can use this to update map if needed, or trust the foreground geolocation
+          // For now, let's keep foreground geolocation for smoother map, but sync data if needed
+          if (info.distKm) setCurrentDistance(info.distKm);
+        });
+
+        // Listen for State Change (Waiting -> Active) from Native
+        const stateListener = TripNotification.addListener('tripStateUpdate', (info: any) => {
+          if (info.status === 'active') {
+            console.log("Native triggered ACTIVE state!");
+            setNavigationStatus('active');
+            onUpdate({ ...trip, status: 'active' });
+            departureNotificationSentRef.current = true; // Sync ref
+          }
+        });
+
+        // Start foreground GPS tracking for map updates
+        const startTracking = async (useHighAccuracy = true) => {
+          try {
+            const permission = await Geolocation.checkPermissions();
+            if (permission.location !== 'granted') await Geolocation.requestPermissions();
+
+            const id = await Geolocation.watchPosition(
+              { enableHighAccuracy: useHighAccuracy, timeout: 10000, maximumAge: 0 },
+              (position, err) => {
+                if (err) {
+                  if (useHighAccuracy) {
+                    if (watchId.current !== null) Geolocation.clearWatch({ id: watchId.current });
+                    startTracking(false);
+                  }
+                  return;
+                }
+                if (position) {
+                  setStatus('active');
+                  const { latitude, longitude, heading: newHeading, speed } = position.coords;
+
+                  // Update Heading if valid and moving
+                  if (typeof newHeading === 'number' && !isNaN(newHeading) && speed && speed > 0.5) {
+                    setHeading(newHeading);
+                  }
+
+                  // Call logic using REFS
+                  calculateDistanceAndTime(latitude, longitude);
+                }
+              }
+            );
+            watchId.current = id;
+          } catch (e: any) {
+            setStatus('error');
+          }
+        };
+
+        if (navigator.geolocation || Geolocation) startTracking(true);
+        else setStatus('error');
+      } catch (e) {
+        console.error('Error starting services:', e);
+      }
+    };
+
+    startBackgroundService();
+
+    return () => {
+      if (watchId.current !== null) Geolocation.clearWatch({ id: watchId.current });
+    };
+  }, []); // Empty dependency array ensures this runs once!
+
+
+  // --- Logic: Calculation & Notification Trigger ---
+  const calculateDistanceAndTime = (currentLat: number, currentLng: number) => {
+    const t = tripRef.current; // Read latest trip data from Ref
+    if (!t.estimatedDistance) return;
+
+    // 1. Smart Start Check (Waiting Mode) - CLIENT SIDE VISUAL ONLY
+    if (navigationStatus === 'waiting') {
+      const distFromStart = calculateDistance(t.startLat || 0, t.startLng || 0, currentLat, currentLng);
+      // Ensure UI reflects waiting status, but DO NOT trigger SMS here (Native does it)
+      if (distFromStart <= 0.5) {
+        setLocationName("출발 대기 중...");
+        return;
+      }
+      // If > 0.5 but native hasn't sent event yet, we can preemptively switch UI, 
+      // but purely rely on native for SMS.
+      // Let's rely on the native event for the switch to ensure sync.
+      // However, for responsiveness, if we detect it here, we can switch UI too.
+      if (distFromStart > 0.5 && !departureNotificationSentRef.current) {
+        // Just update UI state, don't send SMS
+        setNavigationStatus('active');
+        onUpdate({ ...t, status: 'active' });
+        departureNotificationSentRef.current = true;
+      }
+    }
+
+    // 2. Active Mode Logic (Normal Operation)
+
+    // Distance Calculation
+    const traveled = calculateDistance(t.startLat || 0, t.startLng || 0, currentLat, currentLng);
+    const remainingKm = Math.max(0, (t.estimatedDistance || 1) - traveled);
+
+    // FIX: Do NOT overwrite API time with simple calculation.
+    // Instead, only update Distance here. Time is handled by API interval (every 30s).
+    setCurrentDistance(remainingKm);
+
+    const targetDistance = t.targetDistance || 10; // Default 10 min/km
+
+    // Progress
+    const total = t.estimatedDistance || 1;
+    const percent = Math.max(0, Math.min(100, ((total - remainingKm) / total) * 100));
+    setProgressPercent(percent);
+
+    // Pulse Speed Check
+    if (remainingKm < 1.0) setPulseSpeed('fast');
+    else if (remainingKm < 5.0) setPulseSpeed('medium');
+    else setPulseSpeed('slow');
+
+    // Check Notifications (CLIENT SIDE AUDIO ONLY - Native sends SMS)
+    // We keep this for alerting the driver locally if needed, but remove SMS triggering
+    // Actually, "checkNotificationConditions" triggers SMS. We must DISABLE SMS inside there.
+    checkNotificationConditions(currentTime, remainingKm, targetDistance, currentLat, currentLng);
+  };
+
+  const checkNotificationConditions = (
+    time: number, dist: number, triggerDistance: number,
+    currentLat: number, currentLng: number
+  ) => {
+    // 1. Scheduled Notifications
+    const t = tripRef.current;
+
+    // Use Ref to check status to avoid closure staleness
+    notificationsRef.current.forEach(notification => {
+      if (notification.status !== 'pending') return;
+
+      let shouldSend = false;
+      if (notification.type === 'arrival') {
+        // Support both Time and Distance triggers
+        if (notification.condition.type === 'time') shouldSend = time <= notification.condition.value;
+        else shouldSend = dist <= notification.condition.value;
+      }
+
+      if (shouldSend) {
+        // Mark as sent IMMEDIATELY in Ref to prevent double send in next ms
+        markNotificationAsSentLocally(notification.id);
+        sendNotification(notification);
+      }
+    });
+
+    // 2. Location Notification (Dynamic) - e.g. "Passing through X"
+    // Use Ref to check flag
+    if (!locationNotificationSentRef.current && dist <= triggerDistance) {
+      locationNotificationSentRef.current = true; // Lock immediately
+      sendLocationNotification(time, dist, currentLat, currentLng);
+    }
+  };
+
+  const markNotificationAsSentLocally = (id: string) => {
+    // Update the ref immediately so subsequent loops know it's done
+    const newNotifs = notificationsRef.current.map(n => n.id === id ? { ...n, status: 'sent' } : n);
+    notificationsRef.current = newNotifs;
+    // Also update global state/trip to persist visually
+    onUpdate({ ...tripRef.current, notifications: newNotifs as any });
+  };
+
+  const sendLocationNotification = async (time: number, dist: number, lat: number, lng: number) => {
+    const locName = await reverseGeocodeKakao(lat, lng);
+    if (!locName) return;
+
+    const msg = `${locName}을(를) 지나가고 있습니다. ${Math.floor(time)}분 후 도착합니다.`;
+    const phoneNumbers = tripRef.current.recipient?.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+
+    if (phoneNumbers) {
+      const recipients = phoneNumbers.map(p => p.replace(/-/g, '')).join(',');
+      const success = await triggerSms(msg, recipients);
+      if (success) {
+        addLog(`위치 알림 전송: ${msg}`, 'success');
+        // Already flagged in Ref, so safe.
+      }
+    }
+  };
+
+  const sendNotification = async (notification: any) => {
+    // BLOCKED: Native Service sends SMS now.
+    // Keeping logic for UI logs only if needed, but for now we trust native.
+    // To see logs, we might need to listen to Native events for "SMS Sent" too.
+    /*
+    const phoneNumbers = notification.recipient.match(/(01[016789]-?\d{3,4}-?\d{4})/g);
+    if (phoneNumbers) {
+      const recipients = phoneNumbers.map((p: string) => p.replace(/-/g, '')).join(',');
+      const msg = replaceTemplateVariables(notification.message, {
+        time: Math.floor(currentTime),
+        driverName: '운전자',
+        destination: tripRef.current.destination,
+        departure: tripRef.current.departure,
+        currentLocation: locationName || '이동 중' // Added current location
+      });
+
+      const success = await triggerSms(msg, recipients);
+      if (success) {
+        addLog(`알림 전송 성공`, 'success');
+        Toast.show({ text: '✅ 알림이 전송되었습니다.', duration: 'short' });
+
+        // Check completion logic
+        const hasPending = notificationsRef.current.some(n => n.status === 'pending');
+        if (!hasPending) {
+          setIsCompleteDialogOpen(true);
+        }
+      }
+    }
+    */
+  };
+
+  const handleZoomIn = () => {
+    if (mapRef.current) {
+      mapRef.current.setLevel(mapRef.current.getLevel() - 1, { animate: true });
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (mapRef.current) {
+      mapRef.current.setLevel(mapRef.current.getLevel() + 1, { animate: true });
+    }
+  };
+
+  // --- Handlers ---
+  const handleOpenManualSend = () => {
+    const timeText = currentTime >= 60 ? `${Math.floor(currentTime / 60)}시간 ${Math.floor(currentTime % 60)}분` : `${Math.floor(currentTime)}분`;
+    // Modified SMS Content: Include Current Location and Remaining Time
+    const msg = `[알림] 현재 ${locationName || '이동 중'} 근처입니다. ${trip.destination}까지 약 ${timeText} 남았습니다.`;
+    setManualMessage(msg);
+    setManualRecipient(trip.recipient || '');
+    setIsManualSendDialogOpen(true);
+  };
+
+  const handleConfirmManualSend = async () => {
+    if (!manualRecipient || !manualMessage) return;
+    const success = await triggerSms(manualMessage, manualRecipient.replace(/-/g, ''));
+    if (success) {
+      alert('✅ 문자 전송 성공');
+      setIsManualSendDialogOpen(false);
+    } else {
+      alert('❌ 문자 전송 실패');
+    }
+  };
+
+  const handleCancelTrip = async () => {
+    if (watchId.current !== null) await Geolocation.clearWatch({ id: watchId.current });
+    await TripNotification.stopNotification();
+    onCancel();
+    setIsCancelDialogOpen(false);
+    setIsCancelCompleteDialogOpen(true);
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen bg-app-primary text-text-primary pb-32">
+      {/* 1. Header: GPS Status */}
+      <header className="px-6 py-4 flex items-center gap-3 border-b border-border">
+        <div className="relative w-6 h-6 flex items-center justify-center">
+          {status === 'active' && (
+            <>
+              <div className="absolute w-full h-full bg-app-accent-light rounded-full animate-ping" />
+              <div className="w-3 h-3 bg-app-accent rounded-full z-10" />
+            </>
+          )}
+          {status !== 'active' && <div className="w-3 h-3 bg-status-error rounded-full z-10" />}
+        </div>
+        <span className={`text-sm font-medium ${status === 'active' ? 'text-app-accent' : 'text-status-error'}`}>
+          {status === 'active' ? (navigationStatus === 'waiting' ? '출발 대기 중 (GPS 정상)' : '운행 중 (GPS 정상)') : 'GPS 연결 시도 중'}
+        </span>
+      </header>
+
+      {/* 2. Top Info Card */}
+      <div className="px-6 pt-6 mb-4">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-3 opacity-60">
+            <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center">
+              <AlertCircle className="w-4 h-4 text-text-muted rotate-180" />
+            </div>
+            <span className="text-text-muted text-sm animate-pulse">
+              {navigationStatus === 'waiting' ? '출발을 기다리고 있습니다...' : `현재 위치: ${locationName}`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-app-accent flex items-center justify-center shadow-[0_0_15px_rgba(0,255,136,0.3)]">
+              <MapPin className="w-6 h-6 text-app-primary" />
+            </div>
+            <span className="text-xl font-bold text-white">{trip.destination}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Progress Bar & Bell */}
+      <div className="px-6 mb-4">
+        <div className="flex justify-between items-end mb-2">
+          <span className="text-sm text-text-muted">운행 진행률</span>
+          {/* Removed Bell Icon from here */}
+        </div>
+        <div className="h-4 bg-app-secondary rounded-full overflow-hidden relative">
+          <div
+            className="absolute left-0 top-0 h-full bg-app-accent transition-all duration-1000 ease-out flex items-center justify-end pr-1"
+            style={{ width: `${Math.min(100, Math.max(5, progressPercent))}%` }}
+          >
+            <div className="w-2 h-2 bg-white rounded-full animate-ping" />
+          </div>
+        </div>
+        <div className="text-right text-xs font-bold text-app-accent mt-1">{Math.floor(progressPercent)}%</div>
+      </div>
+
+      {/* 4. Map View & Location Banner */}
+      <div className="px-6 mb-4">
+        <div className="rounded-2xl overflow-hidden border border-border bg-app-secondary relative shadow-lg h-48">
+          {/* Map Container */}
+          <div id="active-map" className="w-full h-full" />
+
+          {/* Zoom Controls */}
+          <div className="absolute top-2 right-2 flex flex-col gap-1 z-10">
+            <button onClick={handleZoomIn} className="w-8 h-8 bg-white/90 backdrop-blur rounded text-gray-800 font-bold shadow-md flex items-center justify-center border border-gray-200 active:bg-gray-100">
+              +
+            </button>
+            <button onClick={handleZoomOut} className="w-8 h-8 bg-white/90 backdrop-blur rounded text-gray-800 font-bold shadow-md flex items-center justify-center border border-gray-200 active:bg-gray-100">
+              -
+            </button>
+          </div>
+
+          {/* Location Overlay */}
+          <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-md rounded-lg py-2 px-3 flex items-center gap-2 border border-white/10 z-10">
+            <span className="w-2 h-2 rounded-full bg-app-accent animate-pulse shrink-0" />
+            <span className="text-white text-xs truncate font-medium">{locationName}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Main Timer & Distance (Horizontal Layout) */}
+      <div className="flex-1 flex flex-col items-center justify-start pt-2">
+        <div className="flex items-baseline gap-6 mb-2">
+          <div className={`text-6xl font-bold tracking-tighter drop-shadow-lg transition-colors duration-500 ${navigationStatus === 'waiting' ? 'text-text-muted' : 'text-app-accent'}`}>
+            {Math.floor(currentTime)}<span className="text-2xl ml-1">분</span>
+          </div>
+          <div className={`text-3xl font-bold opacity-80 transition-colors duration-500 ${navigationStatus === 'waiting' ? 'text-text-muted' : 'text-white'}`}>
+            {currentDistance.toFixed(1)}<span className="text-lg ml-1 text-text-muted">km</span>
+          </div>
+        </div>
+        <div className="text-text-muted text-xs">
+          {navigationStatus === 'waiting' ? '출발 시 자동으로 안내가 시작됩니다.' : '위치 정보와 함께 문자가 자동 발송됩니다.'}
+        </div>
+      </div>
+
+      {/* 6. Bottom Reservation Info Card */}
+      <div className="mx-6 mb-4">
+        <div className="text-sm font-bold text-text-muted mb-2 ml-1">예약 내용</div>
+        <div className="bg-app-secondary rounded-2xl p-5 border border-border shadow-xl">
+          <div className="flex items-center gap-4 mb-4 pb-4 border-b border-border/50">
+            <div className="w-8 h-8 rounded-full bg-border flex items-center justify-center">
+              <Navigation className="w-4 h-4 text-text-secondary" />
+            </div>
+            <div className="flex-1">
+              <div className="text-white text-sm font-medium">{trip.destination}</div>
+            </div>
+            <span className={`px-3 py-1 text-app-primary text-xs font-bold rounded-full ${navigationStatus === 'waiting' ? 'bg-text-muted' : 'bg-status-warning'}`}>
+              {navigationStatus === 'waiting' ? '대기중' : '운행중'}
+            </span>
+          </div>
+
+          <div className="flex justify-between items-center text-sm">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-text-muted" />
+              <span className="text-text-secondary">{formatRecipientDisplay(trip.recipient)}</span>
+            </div>
+            <div className="flex items-center gap-2 text-status-warning">
+              <Bell className="w-4 h-4" /> {/* Move Bell Here */}
+              <span>
+                {/* Show Target Condition from Notifications */}
+                {trip.notifications && trip.notifications[0]
+                  ? `${trip.notifications[0].condition.value}${trip.notifications[0].condition.type === 'time' ? '분' : 'km'} 전 알림`
+                  : '알림 설정됨'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 7. Action Buttons */}
+      <div className="px-6 pb-8 space-y-3">
+        <Button
+          onClick={handleOpenManualSend}
+          className="w-full h-14 rounded-2xl bg-app-accent hover:bg-app-accent-hover text-app-primary text-lg font-bold shadow-lg shadow-app-accent/20"
+        >
+          수동 발송
+        </Button>
+        <Button
+          onClick={() => setIsCancelDialogOpen(true)}
+          className="w-full h-14 rounded-2xl bg-red-900/20 hover:bg-red-900/40 text-status-error text-lg font-medium border border-status-error/30"
+        >
+          예약 취소
+        </Button>
+      </div>
+
+      {/* Dialogs */}
+      <Dialog open={isManualSendDialogOpen} onOpenChange={setIsManualSendDialogOpen}>
+        <DialogContent className="bg-app-primary border-border text-text-primary">
+          <DialogHeader><DialogTitle>수동 발송</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-4">
+            <textarea
+              className="w-full h-32 bg-app-secondary border border-border rounded-xl p-4 text-white resize-none focus:border-app-accent outline-none"
+              value={manualMessage}
+              onChange={(e) => setManualMessage(e.target.value)}
+            />
+            <Button onClick={handleConfirmManualSend} className="w-full bg-app-accent text-app-primary font-bold h-12 rounded-xl">전송하기</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+        <DialogContent className="bg-app-primary border-border text-text-primary">
+          <DialogHeader><DialogTitle>예약 취소</DialogTitle></DialogHeader>
+          <div className="py-4 text-center text-text-muted">정말로 예약을 취소하시겠습니까?<br />알림이 더 이상 전송되지 않습니다.</div>
+          <div className="flex gap-3">
+            <Button onClick={() => setIsCancelDialogOpen(false)} className="flex-1 bg-app-secondary text-white">돌아가기</Button>
+            <Button onClick={handleCancelTrip} className="flex-1 bg-red-900/50 text-status-error hover:bg-red-900/80">취소하기</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCancelCompleteDialogOpen} onOpenChange={setIsCancelCompleteDialogOpen}>
+        <DialogContent className="bg-app-primary border-border text-text-primary">
+          <div className="py-8 text-center text-lg font-bold">취소가 완료되었습니다.</div>
+          <Button onClick={() => { setIsCancelCompleteDialogOpen(false); onNavigate('home'); }} className="w-full bg-app-accent text-app-primary">확인</Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCompleteDialogOpen} onOpenChange={setIsCompleteDialogOpen}>
+        <DialogContent className="bg-app-primary border-app-accent text-text-primary">
+          <div className="py-8 text-center space-y-4">
+            <div className="mx-auto w-16 h-16 bg-app-accent rounded-full flex items-center justify-center animate-bounce">
+              <Check className="w-8 h-8 text-app-primary stroke-[3]" />
+            </div>
+            <h2 className="text-xl font-bold">도착 완료!</h2>
+            <p className="text-text-muted">모든 알림 발송이 완료되었습니다.</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+    </div>
+  );
+}

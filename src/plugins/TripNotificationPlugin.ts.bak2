@@ -1,0 +1,21 @@
+import { registerPlugin } from '@capacitor/core';
+
+export interface TripNotificationPlugin {
+    startNotification(options: { tripData: TripData }): Promise<void>;
+    updateNotification(options: { tripData: TripData }): Promise<void>;
+    stopNotification(): Promise<void>;
+}
+
+export interface TripData {
+    destination: string;
+    timeRemaining: number;
+    distance: number;
+    recipient?: string;
+    apiKey?: string;
+    destLat?: number;
+    destLng?: number;
+}
+
+const TripNotification = registerPlugin<TripNotificationPlugin>('TripNotification');
+
+export { TripNotification };

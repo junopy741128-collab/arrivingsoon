@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ArrivingSoon</string>
+    <string name="title_activity_main">ArrivingSoon</string>
+    <string name="package_name">com.example.ans</string>
+    <string name="custom_url_scheme">com.example.ans</string>
+</resources>
