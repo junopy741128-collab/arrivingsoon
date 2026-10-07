@@ -743,6 +743,12 @@ public class TripNotificationService extends Service {
         if (waypointName != null) {
             intent.putExtra("waypointName", waypointName);
         }
+        
+        // [New] 상단 상태알림바(팝업) 알림 표시
+        String alertTitle = "도착햇숑 알림 전송 완료";
+        String alertMsg = ("kakao".equals(smsMode) ? "카카오톡" : "문자") + " 예약 알림이 성공적으로 전송되었습니다.";
+        showSentAlertNotification(alertTitle, alertMsg);
+
         sendBroadcast(intent);
             logToBlackbox("Broadcast TRIP_NOTIFICATION_SENT sent. type=" + type);
 
@@ -916,7 +922,30 @@ public class TripNotificationService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
+
+            // [New] 알림 채널 추가 (상단 팝업 및 소리)
+            NotificationChannel alertChannel = new NotificationChannel("alert_channel", "예약 알림 전송 결과", NotificationManager.IMPORTANCE_HIGH);
+            alertChannel.setDescription("예약된 메시지가 전송될 때 알림을 줍니다.");
+            getSystemService(NotificationManager.class).createNotificationChannel(alertChannel);
         }
+    }
+
+    private void showSentAlertNotification(String title, String message) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "alert_channel")
+                .setSmallIcon(android.R.drawable.ic_menu_send)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setDefaults(Notification.DEFAULT_ALL)
+                .setContentIntent(pendingIntent);
+                
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        manager.notify((int) (System.currentTimeMillis() % 100000), builder.build());
     }
 
     private Notification createNotification(String title, String text) {

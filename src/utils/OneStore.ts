@@ -17,6 +17,9 @@ export interface OneStorePlugin {
         signature: string;
         originalJson: string;
     }>;
+    consume(options: {
+        purchaseToken: string;
+    }): Promise<{ success: boolean }>;
 }
 
 const OneStore = registerPlugin<OneStorePlugin>('OneStore');

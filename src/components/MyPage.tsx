@@ -90,23 +90,22 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
     });
 
     // [New] Purchase Handler
-    const handlePurchase = async () => {
+    const handlePurchase = async (productId: string, productName: string, amount: number, priceStr: string) => {
         try {
-            console.log("💳 [IAP] Initializing Purchase...");
+            console.log("🛠 [IAP] Initializing Purchase for " + productName + "...");
             const { default: OneStore } = await import('../utils/OneStore');
             const { supabase } = await import('../lib/supabaseClient');
 
             await OneStore.init();
 
-            // Product ID: "0001007230" (ONE Store Product ID)
             const result = await OneStore.purchase({
-                productId: '0001007230',
-                productName: '1000 포인트 충전',
-                developerPayload: userProfile.email // Pass email for verification context
+                productId: productId,
+                productName: productName,
+                developerPayload: userProfile.email || '' // Pass email for verification context
             });
 
-            console.log("✅ [IAP] Purchase Success:", result);
-            setAlertState({ open: true, message: "구매가 완료되었습니다! 처리 중..." });
+            console.log("✅[IAP] Purchase Success:", result);
+            setAlertState({ open: true, message: "구매가 완료되었습니다. 처리 중..." });
 
             // 1. Save Receipt to Supabase
             const { error: receiptError } = await supabase
@@ -125,20 +124,32 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
                 });
 
             if (receiptError) {
-                console.error("❌ [IAP] Receipt Save Failed:", receiptError);
+                console.error("❌[IAP] Receipt Save Failed:", receiptError);
             }
 
             // 2. Grant Points
             const { handlePointTransaction } = await import('../lib/supabaseUtils');
             await handlePointTransaction({
                 userId: localStorage.getItem('userId') || '',
-                amount: 1000,
+                amount: amount,
                 type: 'earned',
-                description: '포인트 충전 (1,500원)'
+                description: '포인트 충전 (' + priceStr + ')'
             });
 
-            setAlertState({ open: true, message: "1000 포인트가 충전되었습니다! 🎉" });
-            onNavigate('mypage'); // Refresh
+            // 3. Consume the Product
+            try {
+                console.log("🛠[IAP] Consuming product...");
+                await OneStore.consume({ purchaseToken: result.purchaseToken });
+                console.log("✅[IAP] Consume Success");
+            } catch (consumeErr) {
+                console.error("❌[IAP] Consume Failed:", consumeErr);
+            }
+
+            setAlertState({ open: true, message: amount + " 포인트가 충전되었습니다! 🎉" });
+            
+            // 포인트 내역 새로고침
+            const history = await getPointHistory(localStorage.getItem('userId') || '');
+            setPointHistory(history);
 
         } catch (e: any) {
             console.error("❌ [IAP] Purchase Failed:", e);
@@ -254,16 +265,41 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
                         <span className="text-sm text-text-muted">현재 보유 포인트</span>
                         <div className="text-3xl font-bold text-app-accent mt-1">{userProfile?.points?.toLocaleString() || 0} P</div>
 
-                        {/* [New] Purchase Button */}
-                        <button
-                            onClick={handlePurchase}
-                            className="mt-4 px-4 py-2 bg-app-accent text-app-primary text-sm font-bold rounded-lg hover:bg-white transition-colors flex items-center gap-2"
-                        >
-                            <CreditCard className="w-4 h-4" />
-                            포인트 충전 (1,000P / 1,500원)
-                        </button>
-                    </div>
-                    <div className="absolute right-0 top-0 h-full w-1/3 bg-app-accent/5 skew-x-12"></div>
+                        {/* [New] Purchase Buttons */}
+                          <div className="flex flex-col gap-2 mt-4 relative z-10 w-full max-w-xs">
+                              <button
+                                  onClick={() => handlePurchase('point_1000', '1000 포인트 충전', 1000, '1,000원')}
+                                  className="px-4 py-3 bg-app-accent text-app-primary text-sm font-bold rounded-lg hover:bg-white transition-colors flex items-center justify-between"
+                              >
+                                  <div className="flex items-center gap-2">
+                                      <CreditCard className="w-4 h-4" />
+                                      <span>1000 포인트 충전</span>
+                                  </div>
+                                  <span className="opacity-80">1,000원</span>
+                              </button>
+                              <button
+                                  onClick={() => handlePurchase('point_3000', '3000 포인트 충전', 3000, '3,000원')}
+                                  className="px-4 py-3 bg-app-accent text-app-primary text-sm font-bold rounded-lg hover:bg-white transition-colors flex items-center justify-between"
+                              >
+                                  <div className="flex items-center gap-2">
+                                      <CreditCard className="w-4 h-4" />
+                                      <span>3000 포인트 충전</span>
+                                  </div>
+                                  <span className="opacity-80">3,000원</span>
+                              </button>
+                              <button
+                                  onClick={() => handlePurchase('point_5000', '5500 포인트 충전 (보너스 500P)', 5500, '5,000원')}
+                                  className="px-4 py-3 bg-gradient-to-r from-yellow-400 to-app-accent text-app-primary text-sm font-bold rounded-lg shadow-lg hover:scale-[1.02] transition-transform flex items-center justify-between"
+                              >
+                                  <div className="flex items-center gap-2">
+                                      <CreditCard className="w-4 h-4" />
+                                      <span>5500 P (보너스 500P)</span>
+                                  </div>
+                                  <span className="opacity-80">5,000원</span>
+                              </button>
+                          </div>
+                      </div>
+                      
                 </div>
 
                 {/* Points Tabs */}

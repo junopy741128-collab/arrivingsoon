@@ -147,6 +147,53 @@ public class OneStorePlugin extends Plugin {
             freeSavedCall();
         }
     }
+
+    @PluginMethod
+    public void consume(PluginCall call) {
+        String purchaseToken = call.getString("purchaseToken");
+        if (purchaseClient == null) {
+            call.reject("PurchaseClient not initialized");
+            return;
+        }
+
+        purchaseClient.queryPurchasesAsync(API_VERSION, "inapp", new PurchaseClient.QueryPurchaseListener() {
+            @Override
+            public void onSuccess(List<PurchaseData> list, String productType) {
+                for (PurchaseData data : list) {
+                    if (data.getPurchaseId().equals(purchaseToken)) {
+                        purchaseClient.consumeAsync(API_VERSION, data, new PurchaseClient.ConsumeListener() {
+                            @Override
+                            public void onSuccess(PurchaseData purchaseData) {
+                                JSObject ret = new JSObject();
+                                ret.put("success", true);
+                                call.resolve(ret);
+                            }
+                            @Override
+                            public void onError(IapResult iapResult) {
+                                call.reject("Consume error: " + iapResult.getDescription());
+                            }
+                            @Override
+                            public void onErrorRemoteException() { call.reject("Remote Exception"); }
+                            @Override
+                            public void onErrorSecurityException() { call.reject("Security Exception"); }
+                            @Override
+                            public void onErrorNeedUpdateException() { call.reject("Need Update Exception"); }
+                        });
+                        return;
+                    }
+                }
+                call.reject("PurchaseToken not found in user's active purchases.");
+            }
+            @Override
+            public void onError(IapResult iapResult) { call.reject("Query error: " + iapResult.getDescription()); }
+            @Override
+            public void onErrorRemoteException() { call.reject("Remote Exception"); }
+            @Override
+            public void onErrorSecurityException() { call.reject("Security Exception"); }
+            @Override
+            public void onErrorNeedUpdateException() { call.reject("Need Update Exception"); }
+        });
+    }
     
     // Listener Definition
     PurchaseClient.PurchaseFlowListener mPurchaseFlowListener = new PurchaseClient.PurchaseFlowListener() {
