@@ -12,6 +12,7 @@ interface PermissionGuideProps {
 
 export function PermissionGuide({ onComplete }: PermissionGuideProps) {
     const [step, setStep] = useState<'intro' | 'requesting' | 'denied'>('intro');
+    const [hasOpenedSettings, setHasOpenedSettings] = useState(false);
     const [results, setResults] = useState<{ [key: string]: boolean }>({
         location: false,
         sms: false,
