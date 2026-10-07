@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabaseClient';
 import { setAuthToken } from '../utils/api';
 import { showAlert } from '../utils/globalAlert';
 import { CapacitorKakaoLogin as KakaoLogin } from '@team-lepisode/capacitor-kakao-login';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 
 interface SnsLoginProps {
   onBack: () => void;
@@ -20,6 +21,7 @@ export function SnsLogin({ onBack, onNavigate }: SnsLoginProps) {
   useEffect(() => {
     if (Capacitor.getPlatform() === 'android') {
       KakaoLogin.initialize({ appKey: '29e58998be931737658cd80da3a6ce41' }).catch(console.error);
+      GoogleAuth.initialize().catch(console.error);
     }
   }, []);
   const [isLoading, setIsLoading] = useState(false);
@@ -73,33 +75,37 @@ export function SnsLogin({ onBack, onNavigate }: SnsLoginProps) {
     try {
       const isNative = Capacitor.isNativePlatform();
 
-      if (provider === 'kakao' && isNative) {
-        console.log('[Kakao Native] Starting native login flow...');
-        
-        // 1. 네이티브 카카오 로그인 호출 (카카오톡 열림)
-        const result = await KakaoLogin.login();
-        console.log('[Kakao Native] Result:', result);
+      
+      if (isNative) {
+        if (provider === 'kakao') {
+          console.log('[Kakao Native] Starting native login flow...');
+          const result = await KakaoLogin.login();
+          if (!result.idToken) throw new Error('idToken을 받지 못했습니다.');
 
-        if (!result.idToken) {
-           throw new Error('idToken을 받지 못했습니다. 카카오 데브톡에서 OpenID Connect가 활성화되었는지 확인하세요.');
+          const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'kakao',
+            token: result.idToken,
+          });
+
+          if (error) throw error;
+          if (data.session) setAuthToken(data.session.access_token);
+          return;
+        } 
+        
+        if (provider === 'google') {
+          console.log('[Google Native] Starting native login flow...');
+          const user = await GoogleAuth.signIn();
+          if (!user.authentication.idToken) throw new Error('Google idToken을 받지 못했습니다.');
+
+          const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: user.authentication.idToken,
+          });
+
+          if (error) throw error;
+          if (data.session) setAuthToken(data.session.access_token);
+          return;
         }
-
-        // 2. 받은 idToken으로 Supabase 로그인!
-        console.log('[Kakao Native] Authenticating with Supabase...');
-        const { data, error } = await supabase.auth.signInWithIdToken({
-          provider: 'kakao',
-          token: result.idToken,
-        });
-
-        if (error) throw error;
-        
-        console.log('[Kakao Native] Supabase login success!', data);
-        if (data.session) {
-           setAuthToken(data.session.access_token);
-        }
-        
-        // onAuthStateChange will trigger navigation
-        return; 
       }
 
       // 구글 웹/네이티브 로그인 및 카카오 웹 로그인 처리 로직 (기존 유지)

@@ -6,5 +6,7 @@
     <string name="custom_url_scheme">com.example.ans</string>
     <string name="kakao_app_key">29e58998be931737658cd80da3a6ce41</string>
     <string name="kakao_scheme">kakao29e58998be931737658cd80da3a6ce41</string>
+    <string name="server_client_id">278438361150-fmhf0fvq38o9n4sl9fte2i1katthq3iv.apps.googleusercontent.com</string>
 </resources>
+
 
