@@ -132,11 +132,11 @@ export const handlePointTransaction = async ({
         body: JSON.stringify({ points: newBalance })
     });
 
-    // 5. Trim History (Keep only 40 items)
+    // 5. Trim History (Keep only 50 items)
     try {
         const historyDetails = await directSupabaseFetch(`point_history?user_id=eq.${userId}&select=id&order=created_at.desc`);
-        if (historyDetails && historyDetails.length > 40) {
-            const idsToDelete = historyDetails.slice(40).map((h: any) => h.id);
+        if (historyDetails && historyDetails.length > 50) {
+            const idsToDelete = historyDetails.slice(50).map((h: any) => h.id);
             if (idsToDelete.length > 0) {
                 await directSupabaseFetch(`point_history?id=in.(${idsToDelete.join(',')})`, {
                     method: 'DELETE'

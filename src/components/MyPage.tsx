@@ -19,7 +19,7 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
     const [activeTab, setActiveTab] = useState<'all' | 'earned' | 'used'>('all');
     const [pointHistory, setPointHistory] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-    const [visibleCount, setVisibleCount] = useState(10);
+    const [visibleCount, setVisibleCount] = useState(5);
 
     // [Fix] 임베디드 문서 뷰어 상태 (Capacitor Browser가 HTML을 raw text로 보여주는 문제 해결)
     const [docViewer, setDocViewer] = useState<{ open: boolean; title: string; src: string }>({
@@ -53,7 +53,7 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
     };
 
     const handleLoadMore = () => {
-        setVisibleCount(prev => prev + 10);
+        setVisibleCount(prev => prev + 5);
     };
 
     useEffect(() => {
