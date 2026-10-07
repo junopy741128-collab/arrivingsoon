@@ -9,6 +9,7 @@ import type { Screen } from '../App';
 import { supabase } from '../lib/supabaseClient';
 import { setAuthToken } from '../utils/api';
 import { showAlert } from '../utils/globalAlert';
+import { CapacitorKakaoLogin as KakaoLogin } from '@team-lepisode/capacitor-kakao-login';
 
 interface SnsLoginProps {
   onBack: () => void;
@@ -16,6 +17,11 @@ interface SnsLoginProps {
 }
 
 export function SnsLogin({ onBack, onNavigate }: SnsLoginProps) {
+  useEffect(() => {
+    if (Capacitor.getPlatform() === 'android') {
+      KakaoLogin.initialize({ appKey: '29e58998be931737658cd80da3a6ce41' }).catch(console.error);
+    }
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProvider, setLoadingProvider] = useState<string | null>(null);
 
@@ -60,47 +66,63 @@ export function SnsLogin({ onBack, onNavigate }: SnsLoginProps) {
   }, []);
 
   const handleSnsLogin = async (provider: 'google' | 'kakao') => {
-    console.log(`🔵 [${provider} Login] 버튼 클릭됨`);
+    console.log(`[SnsLogin] ${provider} Login requested`);
     setIsLoading(true);
     setLoadingProvider(provider);
 
     try {
-      console.log('🔵 [Google Login] Supabase 클라이언트 사용됨');
-
       const isNative = Capacitor.isNativePlatform();
+
+      if (provider === 'kakao' && isNative) {
+        console.log('[Kakao Native] Starting native login flow...');
+        
+        // 1. 네이티브 카카오 로그인 호출 (카카오톡 열림)
+        const result = await KakaoLogin.login();
+        console.log('[Kakao Native] Result:', result);
+
+        if (!result.idToken) {
+           throw new Error('idToken을 받지 못했습니다. 카카오 데브톡에서 OpenID Connect가 활성화되었는지 확인하세요.');
+        }
+
+        // 2. 받은 idToken으로 Supabase 로그인!
+        console.log('[Kakao Native] Authenticating with Supabase...');
+        const { data, error } = await supabase.auth.signInWithIdToken({
+          provider: 'kakao',
+          token: result.idToken,
+        });
+
+        if (error) throw error;
+        
+        console.log('[Kakao Native] Supabase login success!', data);
+        if (data.session) {
+           setAuthToken(data.session.access_token);
+        }
+        
+        // onAuthStateChange will trigger navigation
+        return; 
+      }
+
+      // 구글 웹/네이티브 로그인 및 카카오 웹 로그인 처리 로직 (기존 유지)
       const redirectUrl = isNative ? 'com.soon.arrival://login-callback' : window.location.origin;
 
-      console.log(`🔵 [${provider} Login] Platform:`, isNative ? 'Native' : 'Web');
-      console.log(`🔵 [${provider} Login] Redirect URL:`, redirectUrl);
-
-      // [V37] Manual Browser Open with Toolbar Color
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo: redirectUrl,
-          skipBrowserRedirect: true, // [V37] We will open browser manually
+          skipBrowserRedirect: true,
         }
       });
 
-      console.log(`🔵 [${provider} Login] OAuth 응답:`, { data, error });
-
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       if (data?.url) {
-        console.log(`✅ [${provider} Login] OAuth URL 생성됨:`, data.url);
-
         if (isNative) {
-          // [V37] Open Capacitor Browser with Theme Color
-          console.log(`🔵 [${provider} Login] Opening Custom Browser...`);
           await Browser.open({
             url: data.url,
-            toolbarColor: '#0f2920', // App Theme Color
+            toolbarColor: '#0f2920',
             windowName: '_self'
           });
         } else {
-          // Web Fallback
           window.location.href = data.url;
         }
       }

@@ -1,7 +1,10 @@
-<?xml version='1.0' encoding='utf-8'?>
+﻿<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">ArrivingSoon</string>
     <string name="title_activity_main">ArrivingSoon</string>
     <string name="package_name">com.example.ans</string>
     <string name="custom_url_scheme">com.example.ans</string>
+    <string name="kakao_app_key">29e58998be931737658cd80da3a6ce41</string>
+    <string name="kakao_scheme">kakao29e58998be931737658cd80da3a6ce41</string>
 </resources>
+
