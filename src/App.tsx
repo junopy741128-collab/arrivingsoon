@@ -168,6 +168,47 @@ const App: React.FC = () => {
     // [v46] Admin email constant
     const ADMIN_EMAIL = 'junopy741128@gmail.com';
 
+    // [QuickSend] State
+    const [quickPresets, setQuickPresets] = useState<QuickSendPreset[]>(() => {
+        const saved = localStorage.getItem('quick_send_presets');
+        if (saved) {
+            try { return JSON.parse(saved); } catch (e) { }
+        }
+        return DEFAULT_QUICK_SEND_PRESETS;
+    });
+
+    const [quickCountdownEnabled, setQuickCountdownEnabled] = useState<boolean>(() => {
+        const saved = localStorage.getItem('quick_send_countdown_enabled');
+        return saved !== null ? saved === 'true' : true;
+    });
+
+    const [quickModalState, setQuickModalState] = useState<{
+        isOpen: boolean;
+        preset: QuickSendPreset | null;
+    }>({ isOpen: false, preset: null });
+
+    useEffect(() => {
+        localStorage.setItem('quick_send_presets', JSON.stringify(quickPresets));
+    }, [quickPresets]);
+
+    useEffect(() => {
+        localStorage.setItem('quick_send_countdown_enabled', String(quickCountdownEnabled));
+    }, [quickCountdownEnabled]);
+
+    const handleSaveQuickPreset = (preset: QuickSendPreset) => {
+        setQuickPresets(prev => {
+            const exists = prev.some(p => p.id === preset.id);
+            if (exists) {
+                return prev.map(p => p.id === preset.id ? preset : p);
+            }
+            return [...prev, preset];
+        });
+    };
+
+    const handleDeleteQuickPreset = (id: string) => {
+        setQuickPresets(prev => prev.filter(p => p.id !== id));
+    };
+
     // [V23] Permission State
     const [showPermissionGuide, setShowPermissionGuide] = useState(false);
     const [alertState, setAlertState] = useState({ open: false, message: '' });
