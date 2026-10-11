@@ -53,7 +53,7 @@ export function Settings({ onNavigate, currentTheme }: SettingsProps) {
       label: '서비스 및 버전 정보',
       icon: Monitor,
       action: () => { },
-      value: 'v3.1.0'
+      value: 'v3.1.1'
     }
   ];
 

@@ -14,8 +14,8 @@ android {
         applicationId "com.soon.arrival"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 101
-        versionName "3.1.0"
+        versionCode 102
+        versionName "3.1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
         // [v40] Expose KAKAO_API_KEY from .env to BuildConfig
