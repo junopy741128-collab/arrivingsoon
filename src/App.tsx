@@ -172,9 +172,14 @@ const App: React.FC = () => {
     const [quickPresets, setQuickPresets] = useState<QuickSendPreset[]>(() => {
         const saved = localStorage.getItem('quick_send_presets');
         if (saved) {
-            try { return JSON.parse(saved); } catch (e) { }
+            try {
+                const parsed = JSON.parse(saved);
+                // Clear old fake mock data if present
+                const isOldMock = Array.isArray(parsed) && parsed.some((p: any) => p.id === 'preset-1' || p.id === 'preset-2');
+                if (!isOldMock) return parsed;
+            } catch (e) { }
         }
-        return DEFAULT_QUICK_SEND_PRESETS;
+        return [];
     });
 
     const [quickCountdownEnabled, setQuickCountdownEnabled] = useState<boolean>(() => {

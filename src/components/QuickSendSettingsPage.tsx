@@ -35,9 +35,9 @@ export const QuickSendSettingsPage: React.FC<QuickSendSettingsPageProps> = ({
     };
 
     return (
-        <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans pb-28 select-none">
-            {/* Header */}
-            <header className="px-5 pt-4 pb-3 flex items-center justify-between border-b border-white/5">
+        <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans select-none overflow-y-auto pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+            {/* Header with Safe Area padding */}
+            <header className="pt-safe mt-2 px-5 pb-3 flex items-center justify-between border-b border-white/5 shrink-0">
                 <button
                     onClick={onBack}
                     className="p-2 -ml-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
@@ -55,7 +55,7 @@ export const QuickSendSettingsPage: React.FC<QuickSendSettingsPageProps> = ({
                 </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+            <div className="flex-1 px-5 py-4 space-y-4">
                 {/* Top Status Card */}
                 <div className="bg-[#14241F] border border-[#20392F] rounded-2xl p-4 flex items-center justify-between shadow-md">
                     <div className="flex items-center gap-3.5">
@@ -148,8 +148,9 @@ export const QuickSendSettingsPage: React.FC<QuickSendSettingsPageProps> = ({
                         ))}
 
                         {presets.length === 0 && (
-                            <div className="text-center py-10 text-gray-500 text-xs">
-                                등록된 프리셋이 없습니다. 상단 버튼을 눌러 추가해보세요.
+                            <div className="text-center py-10 bg-[#14241F]/60 border border-[#20392F]/50 rounded-2xl p-6 text-gray-400 text-xs space-y-2">
+                                <div>등록된 빠른 문자가 없습니다.</div>
+                                <div className="text-gray-500 text-[11px]">상단의 [+ 새 빠른 문자 등록] 버튼을 눌러 추가해보세요.</div>
                             </div>
                         )}
                     </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, Settings, User, AlertTriangle, SlidersHorizontal, Plus, ArrowLeft, ArrowRight, Play, X, ShieldAlert } from 'lucide-react';
+import { ChevronLeft, Settings, User, AlertTriangle, SlidersHorizontal, Plus, ArrowLeft, ArrowRight, Play, X, Zap } from 'lucide-react';
 import { QuickSendPreset } from '../types/quickSend';
 import { SmsService } from '../services/SmsService';
 
@@ -139,9 +139,9 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
     };
 
     return (
-        <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans pb-28 select-none">
-            {/* Header */}
-            <header className="px-5 pt-4 pb-3 flex items-center justify-between border-b border-white/5">
+        <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans select-none overflow-y-auto pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+            {/* Header with Safe Area padding */}
+            <header className="pt-safe mt-2 px-5 pb-3 flex items-center justify-between border-b border-white/5 shrink-0">
                 <button
                     onClick={onBack}
                     className="p-2 -ml-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
@@ -171,7 +171,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
             </header>
 
             {/* Top Safety Banner */}
-            <div className="mx-5 mt-4 p-3.5 bg-[#182622] border border-[#243B33] rounded-2xl flex items-center justify-between">
+            <div className="mx-5 mt-3 p-3.5 bg-[#182622] border border-[#243B33] rounded-2xl flex items-center justify-between shrink-0">
                 <div className="flex items-start gap-2.5">
                     <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                     <div className="text-xs">
@@ -192,13 +192,13 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
             {/* Status Feedback Toast */}
             {statusMessage && (
-                <div className="mx-5 mt-3 py-2.5 px-4 bg-emerald-500 text-black font-bold text-xs rounded-xl shadow-lg text-center animate-bounce">
+                <div className="mx-5 mt-2.5 py-2.5 px-4 bg-emerald-500 text-black font-bold text-xs rounded-xl shadow-lg text-center animate-bounce shrink-0">
                     {statusMessage}
                 </div>
             )}
 
             {/* Pagination / Focus Mode Info */}
-            <div className="mx-5 mt-5 flex items-center justify-between">
+            <div className="mx-5 mt-3.5 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-[#00E57D]">
                         {presets.length > 0 ? `${currentIndex + 1} / ${presets.length}` : '0 / 0'}
@@ -221,9 +221,9 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
             </div>
 
             {/* Center Focused Card */}
-            <main className="flex-1 mx-5 mt-3 flex flex-col justify-center">
+            <main className="mx-5 mt-3 flex-1 flex flex-col justify-center">
                 {activePreset ? (
-                    <div className="bg-[#14241F] border-2 border-[#00E57D]/40 rounded-3xl p-6 shadow-2xl flex flex-col justify-between min-h-[380px]">
+                    <div className="bg-[#14241F] border-2 border-[#00E57D]/40 rounded-3xl p-5 shadow-2xl flex flex-col justify-between">
                         <div>
                             {/* Card Top: Category and Hook Label */}
                             <div className="flex items-center justify-between mb-3">
@@ -236,7 +236,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                             </div>
 
                             {/* Recipient Name and Phone */}
-                            <div className="mb-4">
+                            <div className="mb-3.5">
                                 <h2 className="text-2xl font-black text-white tracking-tight flex items-baseline gap-2 flex-wrap">
                                     {activePreset.title}
                                     <span className="text-sm font-normal text-gray-400">
@@ -248,11 +248,11 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                             </div>
 
                             {/* Inner Recessed Box: Message Text */}
-                            <div className="bg-[#0B1512] border border-[#1E362C] rounded-2xl p-5 mb-5 shadow-inner">
-                                <div className="text-[11px] font-semibold text-gray-400 mb-2">
+                            <div className="bg-[#0B1512] border border-[#1E362C] rounded-2xl p-4 mb-4 shadow-inner">
+                                <div className="text-[11px] font-semibold text-gray-400 mb-1.5">
                                     전송될 메시지 내용
                                 </div>
-                                <div className="text-lg font-bold text-white leading-relaxed break-keep">
+                                <div className="text-base font-bold text-white leading-relaxed break-keep">
                                     “{activePreset.message}”
                                 </div>
                             </div>
@@ -260,7 +260,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
                         {/* Action Area: Countdown or Ready Button */}
                         <div>
-                            <div className="text-[11px] text-gray-400 text-center mb-2.5 flex items-center justify-center gap-1">
+                            <div className="text-[11px] text-gray-400 text-center mb-2 flex items-center justify-center gap-1">
                                 {countdownEnabled ? (
                                     <>
                                         <span>🔒</span> 버튼 탭 시 오발송 방지{' '}
@@ -277,7 +277,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                             {countdown !== null ? (
                                 <button
                                     onClick={handleCancelCountdown}
-                                    className="w-full h-16 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-lg rounded-2xl shadow-xl flex items-center justify-center gap-3 transition-all animate-pulse"
+                                    className="w-full h-15 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-lg rounded-2xl shadow-xl flex items-center justify-center gap-3 transition-all animate-pulse"
                                 >
                                     <X className="w-6 h-6" />
                                     <span>{countdown}초 후 전송... (탭하여 취소)</span>
@@ -286,7 +286,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                                 <button
                                     onClick={handleStartSend}
                                     disabled={isSending}
-                                    className="w-full h-16 bg-[#00E57D] hover:bg-[#00C56A] active:scale-95 text-black font-black text-lg rounded-2xl shadow-[0_4px_25px_rgba(0,229,125,0.4)] flex items-center justify-center gap-3 transition-all"
+                                    className="w-full h-15 bg-[#00E57D] hover:bg-[#00C56A] active:scale-95 text-black font-black text-lg rounded-2xl shadow-[0_4px_25px_rgba(0,229,125,0.4)] flex items-center justify-center gap-3 transition-all"
                                 >
                                     <Play className="w-6 h-6 fill-black" />
                                     <span>
@@ -297,13 +297,24 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                         </div>
                     </div>
                 ) : (
-                    <div className="bg-[#14241F] border border-[#1E362C] rounded-3xl p-8 text-center min-h-[300px] flex flex-col items-center justify-center">
-                        <p className="text-gray-400 text-sm mb-4">등록된 빠른 문자가 없습니다.</p>
+                    /* Real Empty State */
+                    <div className="bg-[#14241F] border border-[#1E362C] rounded-3xl p-8 text-center min-h-[300px] flex flex-col items-center justify-center space-y-4">
+                        <div className="w-16 h-16 rounded-full bg-[#00E57D]/10 border border-[#00E57D]/30 flex items-center justify-center text-[#00E57D]">
+                            <Zap className="w-8 h-8 fill-[#00E57D]" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-white mb-1.5">등록된 빠른 문자가 없습니다</h3>
+                            <p className="text-xs text-gray-400 leading-relaxed">
+                                운전 중 자주 연락하는 가족이나 거래처를 등록해보세요.<br />
+                                버튼 한 번으로 내 폰 무료 문자가 전송됩니다.
+                            </p>
+                        </div>
                         <button
                             onClick={onOpenAddModal}
-                            className="px-5 py-3 bg-[#00E57D] text-black font-bold text-sm rounded-xl"
+                            className="px-6 py-3.5 bg-[#00E57D] hover:bg-[#00C56A] text-black font-bold text-sm rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2"
                         >
-                            + 새 빠른 문자 등록하기
+                            <Plus className="w-4 h-4 stroke-[2.5]" />
+                            첫 빠른 문자 등록하기
                         </button>
                     </div>
                 )}
@@ -311,17 +322,17 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
             {/* Navigation Buttons: Previous / Next Card */}
             {presets.length > 1 && (
-                <div className="mx-5 mt-4 grid grid-cols-2 gap-3">
+                <div className="mx-5 mt-3 grid grid-cols-2 gap-3 shrink-0">
                     <button
                         onClick={handlePrev}
-                        className="h-13 bg-[#182822] hover:bg-[#20362E] active:scale-95 border border-[#243B33] text-gray-200 font-bold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md py-3.5"
+                        className="h-12 bg-[#182822] hover:bg-[#20362E] active:scale-95 border border-[#243B33] text-gray-200 font-bold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md"
                     >
                         <ArrowLeft className="w-4 h-4" />
                         이전 문자
                     </button>
                     <button
                         onClick={handleNext}
-                        className="h-13 bg-[#182822] hover:bg-[#20362E] active:scale-95 border border-[#243B33] text-gray-200 font-bold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md py-3.5"
+                        className="h-12 bg-[#182822] hover:bg-[#20362E] active:scale-95 border border-[#243B33] text-gray-200 font-bold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all shadow-md"
                     >
                         다음 문자
                         <ArrowRight className="w-4 h-4" />
@@ -330,15 +341,17 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
             )}
 
             {/* Bottom Add Shortcut */}
-            <div className="mx-5 mt-3 text-center">
-                <button
-                    onClick={onOpenAddModal}
-                    className="w-full py-3 text-xs font-semibold text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition-colors"
-                >
-                    <Plus className="w-4 h-4 text-[#00E57D]" />
-                    새 빠른 문자 등록하기
-                </button>
-            </div>
+            {presets.length > 0 && (
+                <div className="mx-5 mt-2.5 text-center shrink-0">
+                    <button
+                        onClick={onOpenAddModal}
+                        className="w-full py-2.5 text-xs font-semibold text-gray-400 hover:text-white flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                        <Plus className="w-4 h-4 text-[#00E57D]" />
+                        새 빠른 문자 등록하기
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
