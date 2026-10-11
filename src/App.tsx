@@ -1,6 +1,6 @@
 import { supabase } from './lib/supabaseClient';
 import { useState, useEffect } from 'react';
-import { Home, Plus, History, User } from 'lucide-react';
+import { Home, Plus, History, User, Zap } from 'lucide-react';
 import { LogoutModal } from './components/LogoutModal';
 
 import { Capacitor } from '@capacitor/core';
@@ -17,6 +17,11 @@ import { ContactManagement } from './components/ContactManagement';
 import { SnsLogin } from './components/SnsLogin';
 import { ProfileEdit } from './components/ProfileEdit';
 import { MyPage } from './components/MyPage';
+import { QuickSendPage } from './components/QuickSendPage';
+import { QuickSendSettingsPage } from './components/QuickSendSettingsPage';
+import { QuickSendModal } from './components/QuickSendModal';
+import { QuickSendPreset, DEFAULT_QUICK_SEND_PRESETS } from './types/quickSend';
+
 import { FavoriteTrips } from './components/FavoriteTrips';
 import { AdminPage } from './components/AdminPage';
 import { MessageManagement } from './components/MessageManagement';
@@ -156,7 +161,7 @@ export type UserProfile = {
     use_car_number?: boolean; // [차량관리] 문자 발송 시 포함 여부
 };
 
-export type Screen = 'intro' | 'home' | 'setup' | 'active' | 'list' | 'settings' | 'contacts' | 'contactsManage' | 'favorites' | 'login' | 'profile' | 'messages' | 'theme' | 'emailLogin' | 'emailSignup' | 'mypage' | 'admin';
+export type Screen = 'intro' | 'home' | 'setup' | 'active' | 'list' | 'settings' | 'contacts' | 'contactsManage' | 'favorites' | 'login' | 'profile' | 'messages' | 'theme' | 'emailLogin' | 'emailSignup' | 'mypage' | 'admin' | 'quickSend' | 'quickSendSettings';
 
 
 const App: React.FC = () => {
@@ -1228,7 +1233,7 @@ const App: React.FC = () => {
         console.log('🎨 [App.tsx] renderScreen 실행, 현재 화면:', currentScreen);
 
         // [Auth Guard] 로그인이 필요한 화면인데 이메일 정보가 없으면 로그인 화면으로 리다이렉트
-        const protectedScreens = ['home', 'setup', 'active', 'list', 'settings', 'contacts', 'contactsManage', 'favorites', 'profile', 'messages', 'theme', 'mypage', 'admin'];
+        const protectedScreens = ['home', 'setup', 'active', 'list', 'settings', 'contacts', 'contactsManage', 'favorites', 'profile', 'messages', 'theme', 'mypage', 'admin', 'quickSend', 'quickSendSettings'];
         if (protectedScreens.includes(currentScreen) && !userProfile.email) {
             console.warn(`🔒 [Auth Guard] 로그인 세션 없음 -> login 화면으로 리다이렉트 (요청: ${currentScreen})`);
             // 즉시 상태 변경 시 렌더링 루프 위험이 있으므로 setTimeout 사용
@@ -1390,6 +1395,24 @@ const App: React.FC = () => {
                     onNavigate={(screen) => setCurrentScreen(screen)}
                     currentTheme={currentTheme}
                 />;
+                        case 'quickSend':
+                return <QuickSendPage
+                    onBack={() => setCurrentScreen('home')}
+                    onNavigateSettings={() => setCurrentScreen('quickSendSettings')}
+                    presets={quickPresets}
+                    onOpenAddModal={() => setQuickModalState({ isOpen: true, preset: null })}
+                    countdownEnabled={quickCountdownEnabled}
+                />;
+            case 'quickSendSettings':
+                return <QuickSendSettingsPage
+                    onBack={() => setCurrentScreen('quickSend')}
+                    presets={quickPresets}
+                    onOpenAddModal={() => setQuickModalState({ isOpen: true, preset: null })}
+                    onEditPreset={(p) => setQuickModalState({ isOpen: true, preset: p })}
+                    onDeletePreset={handleDeleteQuickPreset}
+                    countdownEnabled={quickCountdownEnabled}
+                    onToggleCountdown={setQuickCountdownEnabled}
+                />;
             case 'mypage':
                 return <MyPage onNavigate={(screen) => setCurrentScreen(screen)} userProfile={userProfile} onLogout={handleLogout} />;
             case 'admin':
@@ -1420,7 +1443,7 @@ const App: React.FC = () => {
                     {renderScreen()}
 
                     {/* Bottom Navigation */}
-                    {(currentScreen === 'home' || currentScreen === 'list' || currentScreen === 'mypage' || currentScreen === 'setup') && (
+                    {(currentScreen === 'home' || currentScreen === 'list' || currentScreen === 'mypage' || currentScreen === 'setup' || currentScreen === 'quickSend') && (
                         <div className="fixed bottom-0 left-0 right-0 h-16 pb-8 box-content bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 flex justify-around items-center z-50">
                             <button
                                 onClick={() => setCurrentScreen('home')}
@@ -1429,6 +1452,17 @@ const App: React.FC = () => {
                                 <Home className="w-6 h-6 mb-1" />
                                 <span className="text-[10px]">홈</span>
                             </button>
+                            <button
+                                onClick={() => setCurrentScreen('quickSend')}
+                                className={`flex flex-col items-center justify-center w-full h-full relative ${currentScreen === 'quickSend' ? 'text-app-accent' : 'text-gray-400'}`}
+                            >
+                                <Zap className="w-6 h-6 mb-1" />
+                                <span className="text-[10px] relative">
+                                    원터치
+                                    <span className="absolute -top-1.5 -right-3 text-[7px] bg-emerald-500 text-black px-1 rounded-full font-bold">무료</span>
+                                </span>
+                            </button>
+
                             <button
                                 onClick={() => handleResetAndNavigateSetup()}
                                 className={`flex flex-col items-center justify-center w-full h-full ${currentScreen === 'setup' ? 'text-app-accent' : 'text-gray-400'}`}

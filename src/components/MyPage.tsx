@@ -189,6 +189,7 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
                 contacts: localStorage.getItem('contacts'),
                 templates: localStorage.getItem('sms_templates') || localStorage.getItem('message_templates'),
                 trips: localStorage.getItem('trips'),
+                quick_presets: localStorage.getItem('quick_send_presets'),
                 settings: {
                     sms_mode: localStorage.getItem('preferred_sms_mode'),
                     enable_departure: localStorage.getItem('preferred_enable_departure')
@@ -238,6 +239,7 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
             if (backupData.contacts) localStorage.setItem('contacts', backupData.contacts);
             if (backupData.templates) localStorage.setItem('sms_templates', backupData.templates);
             if (backupData.trips) localStorage.setItem('trips', backupData.trips);
+            if (backupData.quick_presets) localStorage.setItem('quick_send_presets', backupData.quick_presets);
             if (backupData.settings) {
                 if (backupData.settings.sms_mode) localStorage.setItem('preferred_sms_mode', backupData.settings.sms_mode);
                 if (backupData.settings.enable_departure) localStorage.setItem('preferred_enable_departure', backupData.settings.enable_departure);
