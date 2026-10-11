@@ -745,7 +745,7 @@ public class TripNotificationService extends Service {
         }
         
         // [New] 상단 상태알림바(팝업) 알림 표시
-        String alertTitle = "도착햇숑 알림 전송 완료";
+        String alertTitle = "알림 전송 완료";
         String alertMsg = ("kakao".equals(smsMode) ? "카카오톡" : "문자") + " 예약 알림이 성공적으로 전송되었습니다.";
         showSentAlertNotification(alertTitle, alertMsg);
 

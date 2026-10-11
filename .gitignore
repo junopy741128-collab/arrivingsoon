@@ -13,3 +13,5 @@ android/local.properties
 android/*.iml
 android/.idea
 coverage
+
+scratch*

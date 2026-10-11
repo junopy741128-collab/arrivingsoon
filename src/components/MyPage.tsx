@@ -41,6 +41,21 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
         setConfirmState({ isOpen: true, id });
     };
 
+    
+    const handleLinkAccount = async (provider) => {
+        try {
+            const { data, error } = await supabase.auth.linkIdentity({ provider });
+            if (error) {
+                console.error('[Link] Error:', error);
+                alert('계정 연동 실패: ' + error.message + '\n\n(이미 해당 소셜 계정으로 가입된 별도의 계정이 존재할 수 있습니다. 이 경우 고객센터로 문의해주세요.)');
+            } else {
+                console.log('[Link] Success / Redirecting...', data);
+            }
+        } catch (e) {
+            console.error('[Link] Catch:', e);
+        }
+    };
+
     const handleConfirmDelete = async () => {
         if (!confirmState.id) return;
         try {
@@ -393,6 +408,9 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
                     </h2>
                     <div className="bg-app-secondary border border-border rounded-2xl overflow-hidden divide-y divide-border">
                         <MenuItem icon={Bell} label="문자 템플릿 관리 (알림 설정)" onClick={() => onNavigate('messages')} />
+                        <MenuItem icon={User} label="카카오 계정 연동하기" onClick={() => handleLinkAccount('kakao')} />
+                        <MenuItem icon={User} label="구글 계정 연동하기" onClick={() => handleLinkAccount('google')} />
+
                         <MenuItem 
                             icon={Cloud} 
                             label={isCloudSyncing ? "데이터 동기화 중..." : "클라우드 데이터 백업"} 

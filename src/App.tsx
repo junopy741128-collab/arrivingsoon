@@ -245,6 +245,19 @@ const App: React.FC = () => {
                     const hashParams = new URLSearchParams(url.hash ? url.hash.substring(1) : '');
                     const queryParams = new URLSearchParams(url.search);
 
+                    const authError = hashParams.get('error') || queryParams.get('error');
+                    const authErrorDesc = hashParams.get('error_description') || queryParams.get('error_description');
+
+                    if (authError) {
+                        console.error('[Deep Link] OAuth Error:', authError, authErrorDesc);
+                        if (authErrorDesc && (authErrorDesc.toLowerCase().includes('already') || authErrorDesc.includes('Database error saving new user'))) {
+                            alert('고객님은 이미 다른 소셜 계정(구글 등)으로 가입한 이력이 있습니다. 기존 계정으로 로그인해 주세요.');
+                        } else {
+                            alert('로그인 오류: ' + (authErrorDesc ? decodeURIComponent(authErrorDesc.replace(/\+/g, ' ')) : authError));
+                        }
+                        return;
+                    }
+
                     const access_token = hashParams.get('access_token') || queryParams.get('access_token');
                     const refresh_token = hashParams.get('refresh_token') || queryParams.get('refresh_token');
 

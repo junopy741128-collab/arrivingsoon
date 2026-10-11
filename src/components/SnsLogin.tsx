@@ -193,14 +193,7 @@ export function SnsLogin({ onBack, onNavigate }: SnsLoginProps) {
             {isLoading && loadingProvider === 'kakao' ? '로그인 중...' : '카카오로 계속하기'}
           </Button>
 
-          {/* Email Login */}
-          <Button
-            onClick={() => onNavigate('emailLogin')}
-            className="w-full h-14 rounded-2xl border border-[#00ff88] bg-transparent hover:bg-[#1a3d32] text-white flex items-center justify-center gap-3"
-          >
-            <Mail className="w-5 h-5" />
-            이메일로 계속하기
-          </Button>
+          
         </div>
 
 

@@ -88,8 +88,11 @@ export function PermissionGuide({ onComplete }: PermissionGuideProps) {
 
             // 안드로이드이고 SMS 권한이 없으면 제한된 설정 안내 페이지(denied) 표시
             if (Capacitor.getPlatform() === 'android' && !smsGranted) {
-                setStep('denied');
-                return;
+                const isStoreTarget = import.meta.env.VITE_STORE_TARGET === 'ONESTORE' || import.meta.env.VITE_STORE_TARGET === 'GOOGLE';
+                if (!isStoreTarget) {
+                    setStep('denied');
+                    return;
+                }
             }
 
             onComplete();
