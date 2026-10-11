@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft, MoreVertical, User, Zap, Plus, GripVertical, Edit3, Trash2, Shield, MessageSquare } from 'lucide-react';
+import { ChevronLeft, Zap, Plus, GripVertical, Edit3, Trash2, Shield, MessageSquare } from 'lucide-react';
 import { QuickSendPreset } from '../types/quickSend';
 
 interface QuickSendSettingsPageProps {
@@ -36,7 +36,7 @@ export const QuickSendSettingsPage: React.FC<QuickSendSettingsPageProps> = ({
 
     return (
         <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans select-none overflow-y-auto pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
-            {/* Header with Safe Area padding */}
+            {/* Header: Cleaned up */}
             <header className="pt-safe mt-2 px-5 pb-3 flex items-center justify-between border-b border-white/5 shrink-0">
                 <button
                     onClick={onBack}
@@ -45,14 +45,7 @@ export const QuickSendSettingsPage: React.FC<QuickSendSettingsPageProps> = ({
                     <ChevronLeft className="w-6 h-6" />
                 </button>
                 <h1 className="text-lg font-bold text-white tracking-tight">Quick Send Settings</h1>
-                <div className="flex items-center gap-2">
-                    <button className="p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10">
-                        <MoreVertical className="w-5 h-5" />
-                    </button>
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-                        <User className="w-4 h-4" />
-                    </div>
-                </div>
+                <div className="w-6"></div>
             </header>
 
             <div className="flex-1 px-5 py-4 space-y-4">

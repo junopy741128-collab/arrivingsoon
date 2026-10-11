@@ -26,7 +26,7 @@ export const SmsService = {
         if (!requestResult.granted) {
           return {
             success: false,
-            error: 'SMS 권한이 거부되었습니다. 앱 설정에서 권한을 허용해주세요.'
+            error: 'SMS 권한이 필요합니다. 휴대폰 설정 > 애플리케이션 > 곧도착해용 > 권한에서 "SMS"를 허용해주세요.'
           };
         }
       }
@@ -42,9 +42,8 @@ export const SmsService = {
       console.error('[SmsService] Local SMS Error:', error);
       return {
         success: false,
-        error: `문자 전송 실패: ${error.message || '알 수 없는 오류'}`
+        error: error.message || '문자 전송에 실패했습니다. 권한 또는 잔여 문자를 확인해주세요.'
       };
     }
   },
 };
-

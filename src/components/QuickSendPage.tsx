@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, Settings, User, AlertTriangle, SlidersHorizontal, Plus, ArrowLeft, ArrowRight, Play, X, Zap } from 'lucide-react';
+import { ChevronLeft, Settings, AlertTriangle, SlidersHorizontal, Plus, ArrowLeft, ArrowRight, Play, X, Zap } from 'lucide-react';
 import { QuickSendPreset } from '../types/quickSend';
 import { SmsService } from '../services/SmsService';
 
@@ -61,6 +61,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
         let successCount = 0;
         let failCount = 0;
+        let lastError = '';
 
         for (const recipient of preset.recipients) {
             try {
@@ -72,10 +73,12 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                     successCount++;
                 } else {
                     failCount++;
+                    lastError = res.error || '발송 실패';
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error('[QuickSend] Error sending to', recipient.phone, err);
                 failCount++;
+                lastError = err?.message || '발송 실패';
             }
         }
 
@@ -87,6 +90,9 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         } else {
             setStatusMessage(`⚠️ ${successCount}건 전송 성공, ${failCount}건 실패`);
+            if (lastError) {
+                alert(`문자 전송 실패 안내:\n${lastError}`);
+            }
         }
 
         setTimeout(() => setStatusMessage(null), 3000);
@@ -140,7 +146,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
     return (
         <div className="flex flex-col min-h-screen bg-[#0F1715] text-white font-sans select-none overflow-y-auto pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
-            {/* Header with Safe Area padding */}
+            {/* Header: Profile avatar removed as requested */}
             <header className="pt-safe mt-2 px-5 pb-3 flex items-center justify-between border-b border-white/5 shrink-0">
                 <button
                     onClick={onBack}
@@ -164,9 +170,6 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                     >
                         <Settings className="w-5 h-5" />
                     </button>
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-                        <User className="w-4 h-4" />
-                    </div>
                 </div>
             </header>
 
@@ -260,7 +263,7 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
 
                         {/* Action Area: Countdown or Ready Button */}
                         <div>
-                            <div className="text-[11px] text-gray-400 text-center mb-2 flex items-center justify-center gap-1">
+                            <div className="text-[11px] text-gray-400 text-center mb-2.5 flex items-center justify-center gap-1">
                                 {countdownEnabled ? (
                                     <>
                                         <span>🔒</span> 버튼 탭 시 오발송 방지{' '}
@@ -273,22 +276,22 @@ export const QuickSendPage: React.FC<QuickSendPageProps> = ({
                                 )}
                             </div>
 
-                            {/* Main Send Button */}
+                            {/* Main Send Button: Made significantly thicker (h-[76px]) as requested */}
                             {countdown !== null ? (
                                 <button
                                     onClick={handleCancelCountdown}
-                                    className="w-full h-15 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-lg rounded-2xl shadow-xl flex items-center justify-center gap-3 transition-all animate-pulse"
+                                    className="w-full h-[76px] py-4 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xl rounded-2xl shadow-2xl flex items-center justify-center gap-3 transition-all animate-pulse"
                                 >
-                                    <X className="w-6 h-6" />
+                                    <X className="w-7 h-7" />
                                     <span>{countdown}초 후 전송... (탭하여 취소)</span>
                                 </button>
                             ) : (
                                 <button
                                     onClick={handleStartSend}
                                     disabled={isSending}
-                                    className="w-full h-15 bg-[#00E57D] hover:bg-[#00C56A] active:scale-95 text-black font-black text-lg rounded-2xl shadow-[0_4px_25px_rgba(0,229,125,0.4)] flex items-center justify-center gap-3 transition-all"
+                                    className="w-full h-[76px] py-4 bg-[#00E57D] hover:bg-[#00C56A] active:scale-95 text-black font-black text-xl rounded-2xl shadow-[0_6px_30px_rgba(0,229,125,0.45)] flex items-center justify-center gap-3 transition-all"
                                 >
-                                    <Play className="w-6 h-6 fill-black" />
+                                    <Play className="w-7 h-7 fill-black" />
                                     <span>
                                         {countdownEnabled ? '즉시 전송 (3초 취소 안전망)' : '즉시 전송하기'}
                                     </span>
