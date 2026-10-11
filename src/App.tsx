@@ -1549,6 +1549,16 @@ const App: React.FC = () => {
                 onClose={() => setAlertState({ ...alertState, open: false })}
                 message={alertState.message}
             />
+
+            {/* Quick Send Modal */}
+            <QuickSendModal
+                isOpen={quickModalState.isOpen}
+                onClose={() => setQuickModalState({ isOpen: false, preset: null })}
+                onSave={handleSaveQuickPreset}
+                onDelete={handleDeleteQuickPreset}
+                initialPreset={quickModalState.preset}
+                contacts={contacts}
+            />
         </div>
     );
 };
