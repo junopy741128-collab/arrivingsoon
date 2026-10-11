@@ -1558,6 +1558,7 @@ const App: React.FC = () => {
                 onDelete={handleDeleteQuickPreset}
                 initialPreset={quickModalState.preset}
                 contacts={contacts}
+                onUpdateContacts={setContacts}
             />
         </div>
     );
