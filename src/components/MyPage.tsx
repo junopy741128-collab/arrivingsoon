@@ -432,7 +432,7 @@ export function MyPage({ onNavigate, userProfile, isAdmin, onLogout }: MyPagePro
                         <MenuItem icon={HelpCircle} label="자주 묻는 질문 (FAQ)" onClick={() => openDoc('자주 묻는 질문', '/faq.html')} />
                         <MenuItem icon={FileText} label="서비스 이용약관" onClick={() => openDoc('서비스 이용약관', '/terms_of_service.html')} />
                         <MenuItem icon={ShieldCheck} label="개인정보 처리방침" onClick={() => openDoc('개인정보 처리방침', '/privacy_policy.html')} />
-                        <MenuItem icon={Monitor} label="서비스 및 버전 정보" onClick={() => { }} value="v2.8.0" />
+                        <MenuItem icon={Monitor} label="서비스 및 버전 정보" onClick={() => { }} value="v3.1.0" />
                     </div>
                 </div>
 
